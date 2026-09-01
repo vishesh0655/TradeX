@@ -89,3 +89,63 @@ def login_user(payload: schemas.UserLogin, db: Session = Depends(get_db)):
 @app.get("/me", response_model=schemas.UserOut)
 def read_current_user(current_user: models.User = Depends(get_current_user)):
     return current_user
+@app.post("/orders/buy", response_model=schemas.OrderOut, status_code=status.HTTP_201_CREATED)
+def buy_stock(
+    payload: schemas.OrderCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    stock = db.query(models.Stock).filter(models.Stock.symbol == payload.stock_symbol.upper()).first()
+    if not stock:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock not found")
+
+    if payload.quantity <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity must be positive")
+
+    total_cost = stock.current_price * payload.quantity
+
+    wallet = db.query(models.Wallet).filter(models.Wallet.user_id == current_user.id).first()
+    if wallet.balance < total_cost:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient balance")
+
+    try:
+        wallet.balance -= total_cost
+
+        holding = (
+            db.query(models.Holding)
+            .filter(models.Holding.user_id == current_user.id, models.Holding.stock_id == stock.id)
+            .first()
+        )
+
+        if holding:
+            total_shares = holding.quantity + payload.quantity
+            total_invested = (holding.average_buy_price * holding.quantity) + total_cost
+            holding.average_buy_price = total_invested / total_shares
+            holding.quantity = total_shares
+        else:
+            holding = models.Holding(
+                user_id=current_user.id,
+                stock_id=stock.id,
+                quantity=payload.quantity,
+                average_buy_price=stock.current_price,
+            )
+            db.add(holding)
+
+        order = models.Order(
+            user_id=current_user.id,
+            stock_id=stock.id,
+            order_type="BUY",
+            quantity=payload.quantity,
+            price_per_share=stock.current_price,
+            status="COMPLETED",
+        )
+        db.add(order)
+
+        db.commit()
+        db.refresh(order)
+
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order failed, please try again")
+
+    return order

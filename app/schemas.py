@@ -22,3 +22,19 @@ class UserLogin(BaseModel):
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
+class OrderCreate(BaseModel):
+    stock_symbol: str
+    quantity: int
+
+
+class OrderOut(BaseModel):
+    id: int
+    stock_id: int
+    order_type: str
+    quantity: int
+    price_per_share: float
+    total_amount: float
+    status: str
+
+    class Config:
+        from_attributes = True
