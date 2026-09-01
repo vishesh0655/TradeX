@@ -149,3 +149,54 @@ def buy_stock(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order failed, please try again")
 
     return order
+@app.post("/orders/sell", response_model=schemas.OrderOut, status_code=status.HTTP_201_CREATED)
+def sell_stock(
+    payload: schemas.OrderCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    stock = db.query(models.Stock).filter(models.Stock.symbol == payload.stock_symbol.upper()).first()
+    if not stock:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock not found")
+
+    if payload.quantity <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity must be positive")
+
+    holding = (
+        db.query(models.Holding)
+        .filter(models.Holding.user_id == current_user.id, models.Holding.stock_id == stock.id)
+        .first()
+    )
+
+    if not holding or holding.quantity < payload.quantity:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient shares to sell")
+
+    total_proceeds = stock.current_price * payload.quantity
+
+    try:
+        wallet = db.query(models.Wallet).filter(models.Wallet.user_id == current_user.id).first()
+        wallet.balance += total_proceeds
+
+        if holding.quantity == payload.quantity:
+            db.delete(holding)
+        else:
+            holding.quantity -= payload.quantity
+
+        order = models.Order(
+            user_id=current_user.id,
+            stock_id=stock.id,
+            order_type="SELL",
+            quantity=payload.quantity,
+            price_per_share=stock.current_price,
+            status="COMPLETED",
+        )
+        db.add(order)
+
+        db.commit()
+        db.refresh(order)
+
+    except Exception:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order failed, please try again")
+
+    return order
