@@ -1,4 +1,9 @@
+# Backend
 .venv/
 __pycache__/
 *.py[cod]
 .env
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
