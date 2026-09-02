@@ -200,3 +200,31 @@ def sell_stock(
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order failed, please try again")
 
     return order
+@app.get("/holdings", response_model=list[schemas.HoldingOut])
+def get_holdings(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    holdings = db.query(models.Holding).filter(models.Holding.user_id == current_user.id).all()
+
+    result = []
+    for holding in holdings:
+        stock = holding.stock
+        invested_value = holding.average_buy_price * holding.quantity
+        current_value = stock.current_price * holding.quantity
+        profit_loss = current_value - invested_value
+        profit_loss_percent = (profit_loss / invested_value) * 100 if invested_value > 0 else 0
+
+        result.append(schemas.HoldingOut(
+            stock_symbol=stock.symbol,
+            company_name=stock.company_name,
+            quantity=holding.quantity,
+            average_buy_price=float(holding.average_buy_price),
+            current_price=float(stock.current_price),
+            current_value=float(current_value),
+            invested_value=float(invested_value),
+            profit_loss=float(profit_loss),
+            profit_loss_percent=round(float(profit_loss_percent), 2),
+        ))
+
+    return result

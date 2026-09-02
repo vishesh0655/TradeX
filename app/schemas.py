@@ -38,3 +38,13 @@ class OrderOut(BaseModel):
 
     class Config:
         from_attributes = True
+class HoldingOut(BaseModel):
+    stock_symbol: str
+    company_name: str
+    quantity: int
+    average_buy_price: float
+    current_price: float
+    current_value: float
+    invested_value: float
+    profit_loss: float
+    profit_loss_percent: float
