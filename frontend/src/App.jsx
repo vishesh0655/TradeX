@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import Login from './Login'
+import Portfolio from './Portfolio'
 
 function App() {
   const [stocks, setStocks] = useState([])
@@ -25,6 +26,7 @@ function App() {
     <div>
       <h1>TradeX</h1>
       <button onClick={handleLogout}>Logout</button>
+      <Portfolio />
       <h2>Available Stocks</h2>
       <ul>
         {stocks.map((stock) => (
