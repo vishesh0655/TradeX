@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
-import Login from './Login'
+import Login from './login'
 import Portfolio from './Portfolio'
+import Trade from './trade'
 
 function App() {
   const [stocks, setStocks] = useState([])
   const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('token'))
+  const [refreshTrigger, setRefreshTrigger] = useState(0)
 
   useEffect(() => {
     fetch('http://127.0.0.1:8000/stocks')
@@ -26,7 +28,8 @@ function App() {
     <div>
       <h1>TradeX</h1>
       <button onClick={handleLogout}>Logout</button>
-      <Portfolio />
+      <Trade onTradeComplete={() => setRefreshTrigger((n) => n + 1)} />
+      <Portfolio refreshTrigger={refreshTrigger} />
       <h2>Available Stocks</h2>
       <ul>
         {stocks.map((stock) => (

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 
-function Portfolio() {
+function Portfolio({ refreshTrigger }) {
   const [holdings, setHoldings] = useState([])
   const [error, setError] = useState('')
 
@@ -16,7 +16,7 @@ function Portfolio() {
       })
       .then((data) => setHoldings(data))
       .catch((err) => setError(err.message))
-  }, [])
+  }, [refreshTrigger])
 
   if (error) return <p style={{ color: 'red' }}>{error}</p>
 
