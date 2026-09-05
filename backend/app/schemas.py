@@ -11,6 +11,7 @@ class UserOut(BaseModel):
     id: int
     name: str
     email: str
+    wallet_balance: float
 
     class Config:
         from_attributes = True

@@ -97,7 +97,12 @@ def login_user(payload: schemas.UserLogin, db: Session = Depends(get_db)):
     return {"access_token": access_token, "token_type": "bearer"}
 @app.get("/me", response_model=schemas.UserOut)
 def read_current_user(current_user: models.User = Depends(get_current_user)):
-    return current_user
+    return schemas.UserOut(
+        id=current_user.id,
+        name=current_user.name,
+        email=current_user.email,
+        wallet_balance=float(current_user.wallet.balance),
+    )
 @app.post("/orders/buy", response_model=schemas.OrderOut, status_code=status.HTTP_201_CREATED)
 def buy_stock(
     payload: schemas.OrderCreate,
