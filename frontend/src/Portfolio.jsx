@@ -7,7 +7,7 @@ function Portfolio({ refreshTrigger }) {
   useEffect(() => {
     const token = localStorage.getItem('token')
 
-    fetch('http://127.0.0.1:8000/holdings', {
+    fetch(`${import.meta.env.VITE_API_URL}/holdings`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((response) => {

@@ -15,7 +15,7 @@ function App() {
   if (!isLoggedIn) return
 
   const token = localStorage.getItem('token')
-  fetch('http://127.0.0.1:8000/me', {
+  fetch(`${import.meta.env.VITE_API_URL}/me`, {
     headers: { Authorization: `Bearer ${token}` },
   })
     .then((response) => response.json())
