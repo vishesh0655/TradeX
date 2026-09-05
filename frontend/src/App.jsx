@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
-import Login from './login'
+import Login from './Login'
+import Register from './Register'
 import Portfolio from './Portfolio'
-import Trade from './trade'
+import Trade from './Trade'
 
 function App() {
   const [stocks, setStocks] = useState([])
   const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('token'))
   const [refreshTrigger, setRefreshTrigger] = useState(0)
+  const [authView, setAuthView] = useState('login')
 
   useEffect(() => {
     fetch('http://127.0.0.1:8000/stocks')
@@ -21,7 +23,20 @@ function App() {
   }
 
   if (!isLoggedIn) {
-    return <Login onLoginSuccess={() => setIsLoggedIn(true)} />
+    if (authView === 'register') {
+      return (
+        <Register
+          onRegisterSuccess={() => setAuthView('login')}
+          onSwitchToLogin={() => setAuthView('login')}
+        />
+      )
+    }
+    return (
+      <Login
+        onLoginSuccess={() => setIsLoggedIn(true)}
+        onSwitchToRegister={() => setAuthView('register')}
+      />
+    )
   }
 
   return (
