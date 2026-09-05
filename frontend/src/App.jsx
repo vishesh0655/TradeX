@@ -1,21 +1,27 @@
 import { useEffect, useState } from 'react'
 import Login from './Login'
-import Register from './Register'
+import Register from './register'
 import Portfolio from './Portfolio'
-import Trade from './Trade'
+import Trade from './trade'
 
 function App() {
   const [stocks, setStocks] = useState([])
+  const [walletBalance, setWalletBalance] = useState(null)
   const [isLoggedIn, setIsLoggedIn] = useState(!!localStorage.getItem('token'))
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [authView, setAuthView] = useState('login')
 
   useEffect(() => {
-    fetch('http://127.0.0.1:8000/stocks')
-      .then((response) => response.json())
-      .then((data) => setStocks(data.stocks))
-      .catch((error) => console.error('Error fetching stocks:', error))
-  }, [])
+  if (!isLoggedIn) return
+
+  const token = localStorage.getItem('token')
+  fetch('http://127.0.0.1:8000/me', {
+    headers: { Authorization: `Bearer ${token}` },
+  })
+    .then((response) => response.json())
+    .then((data) => setWalletBalance(data.wallet_balance))
+    .catch((error) => console.error('Error fetching user info:', error))
+}, [isLoggedIn, refreshTrigger])
 
   const handleLogout = () => {
     localStorage.removeItem('token')
@@ -43,6 +49,7 @@ function App() {
     <div>
       <h1>TradeX</h1>
       <button onClick={handleLogout}>Logout</button>
+      {walletBalance !== null && <h3>Wallet Balance: ₹{walletBalance.toFixed(2)}</h3>}
       <Trade onTradeComplete={() => setRefreshTrigger((n) => n + 1)} />
       <Portfolio refreshTrigger={refreshTrigger} />
       <h2>Available Stocks</h2>
