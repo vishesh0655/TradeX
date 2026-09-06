@@ -242,3 +242,15 @@ def get_holdings(
         ))
 
     return result
+@app.get("/orders", response_model=list[schemas.OrderOut])
+def get_order_history(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    orders = (
+        db.query(models.Order)
+        .filter(models.Order.user_id == current_user.id)
+        .order_by(models.Order.created_at.desc())
+        .all()
+    )
+    return orders
