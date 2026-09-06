@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import Login from './Login'
 import Register from './register'
 import Portfolio from './Portfolio'
+import OrderHistory from './OrderHistory'
 import Trade from './trade'
 
 function App() {
@@ -52,6 +53,7 @@ function App() {
       {walletBalance !== null && <h3>Wallet Balance: ₹{walletBalance.toFixed(2)}</h3>}
       <Trade onTradeComplete={() => setRefreshTrigger((n) => n + 1)} />
       <Portfolio refreshTrigger={refreshTrigger} />
+      <OrderHistory refreshTrigger={refreshTrigger} />
       <h2>Available Stocks</h2>
       <ul>
         {stocks.map((stock) => (
