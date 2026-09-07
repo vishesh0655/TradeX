@@ -30,7 +30,7 @@ class OrderCreate(BaseModel):
 
 class OrderOut(BaseModel):
     id: int
-    stock_id: int
+    stock_symbol: str
     order_type: str
     quantity: int
     price_per_share: float

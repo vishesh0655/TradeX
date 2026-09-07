@@ -253,4 +253,16 @@ def get_order_history(
         .order_by(models.Order.created_at.desc())
         .all()
     )
-    return orders
+
+    return [
+        schemas.OrderOut(
+            id=order.id,
+            stock_symbol=order.stock.symbol,
+            order_type=order.order_type,
+            quantity=order.quantity,
+            price_per_share=float(order.price_per_share),
+            total_amount=float(order.total_amount),
+            status=order.status,
+        )
+        for order in orders
+    ]

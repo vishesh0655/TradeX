@@ -30,7 +30,7 @@ function OrderHistory({ refreshTrigger }) {
           <thead>
             <tr>
               <th>Type</th>
-              <th>Stock ID</th>
+              <th>Symbol</th>
               <th>Qty</th>
               <th>Price/Share</th>
               <th>Total</th>
@@ -43,7 +43,7 @@ function OrderHistory({ refreshTrigger }) {
                 <td style={{ color: order.order_type === 'BUY' ? '#4ade80' : '#f87171' }}>
                   {order.order_type}
                 </td>
-                <td>{order.stock_id}</td>
+                <td>{order.stock_symbol}</td>
                 <td>{order.quantity}</td>
                 <td>₹{order.price_per_share}</td>
                 <td>₹{order.total_amount}</td>
