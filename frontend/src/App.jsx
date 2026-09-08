@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import Login from './Login'
-import Register from './register'
+import Register from './Register'
 import Portfolio from './Portfolio'
 import OrderHistory from './OrderHistory'
-import Trade from './trade'
+import Trade from './Trade'
 
 function App() {
   const [stocks, setStocks] = useState([])
@@ -12,22 +12,37 @@ function App() {
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [authView, setAuthView] = useState('login')
 
-  useEffect(() => {
-  if (!isLoggedIn) return
-
-  const token = localStorage.getItem('token')
-  fetch(`${import.meta.env.VITE_API_URL}/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-    .then((response) => response.json())
-    .then((data) => setWalletBalance(data.wallet_balance))
-    .catch((error) => console.error('Error fetching user info:', error))
-}, [isLoggedIn, refreshTrigger])
-
   const handleLogout = () => {
     localStorage.removeItem('token')
     setIsLoggedIn(false)
   }
+
+  useEffect(() => {
+    fetch(`${import.meta.env.VITE_API_URL}/stocks`)
+      .then((response) => response.json())
+      .then((data) => setStocks(data.stocks))
+      .catch((error) => console.error('Error fetching stocks:', error))
+  }, [])
+
+  useEffect(() => {
+    if (!isLoggedIn) return
+
+    const token = localStorage.getItem('token')
+    fetch(`${import.meta.env.VITE_API_URL}/me`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+      .then((response) => {
+        if (response.status === 401) {
+          handleLogout()
+          return null
+        }
+        return response.json()
+      })
+      .then((data) => {
+        if (data) setWalletBalance(data.wallet_balance)
+      })
+      .catch((error) => console.error('Error fetching user info:', error))
+  }, [isLoggedIn, refreshTrigger])
 
   if (!isLoggedIn) {
     if (authView === 'register') {
