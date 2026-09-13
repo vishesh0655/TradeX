@@ -162,7 +162,17 @@ def buy_stock(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order failed, please try again")
 
-    return order
+    return schemas.OrderOut(
+        id=order.id,
+        stock_symbol=stock.symbol,
+        order_type=order.order_type,
+        quantity=order.quantity,
+        price_per_share=float(order.price_per_share),
+        total_amount=float(order.total_amount),
+        status=order.status,
+    )
+
+
 @app.post("/orders/sell", response_model=schemas.OrderOut, status_code=status.HTTP_201_CREATED)
 def sell_stock(
     payload: schemas.OrderCreate,
@@ -213,7 +223,15 @@ def sell_stock(
         db.rollback()
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order failed, please try again")
 
-    return order
+    return schemas.OrderOut(
+        id=order.id,
+        stock_symbol=stock.symbol,
+        order_type=order.order_type,
+        quantity=order.quantity,
+        price_per_share=float(order.price_per_share),
+        total_amount=float(order.total_amount),
+        status=order.status,
+    )
 @app.get("/holdings", response_model=list[schemas.HoldingOut])
 def get_holdings(
     db: Session = Depends(get_db),
@@ -266,3 +284,6 @@ def get_order_history(
         )
         for order in orders
     ]
+
+
+
