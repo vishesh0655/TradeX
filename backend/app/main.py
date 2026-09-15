@@ -109,33 +109,61 @@ def buy_stock(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    stock = db.query(models.Stock).filter(models.Stock.symbol == payload.stock_symbol.upper()).first()
+    stock = (
+        db.query(models.Stock)
+        .filter(models.Stock.symbol == payload.stock_symbol.upper())
+        .first()
+    )
+
     if not stock:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Stock not found")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Stock not found",
+        )
 
     if payload.quantity <= 0:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Quantity must be positive")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Quantity must be positive",
+        )
 
     total_cost = stock.current_price * payload.quantity
 
-    wallet = db.query(models.Wallet).filter(models.Wallet.user_id == current_user.id).first()
+    wallet = (
+        db.query(models.Wallet)
+        .filter(models.Wallet.user_id == current_user.id)
+        .first()
+    )
+
     if wallet.balance < total_cost:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Insufficient balance")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Insufficient balance",
+        )
 
     try:
+        # 1. Deduct money from wallet
         wallet.balance -= total_cost
 
+        # 2. Update holding
         holding = (
             db.query(models.Holding)
-            .filter(models.Holding.user_id == current_user.id, models.Holding.stock_id == stock.id)
+            .filter(
+                models.Holding.user_id == current_user.id,
+                models.Holding.stock_id == stock.id,
+            )
             .first()
         )
 
         if holding:
             total_shares = holding.quantity + payload.quantity
-            total_invested = (holding.average_buy_price * holding.quantity) + total_cost
+            total_invested = (
+                holding.average_buy_price * holding.quantity
+            ) + total_cost
+
             holding.average_buy_price = total_invested / total_shares
             holding.quantity = total_shares
+
         else:
             holding = models.Holding(
                 user_id=current_user.id,
@@ -145,6 +173,7 @@ def buy_stock(
             )
             db.add(holding)
 
+        # 3. Create order
         order = models.Order(
             user_id=current_user.id,
             stock_id=stock.id,
@@ -155,12 +184,29 @@ def buy_stock(
         )
         db.add(order)
 
+        # Flush so PostgreSQL generates order.id
+        db.flush()
+
+        # 4. Create wallet transaction
+        wallet_transaction = models.WalletTransaction(
+            wallet_id=wallet.id,
+            transaction_type="BUY",
+            amount=-total_cost,
+            balance_after=wallet.balance,
+            reference_id=order.id,
+        )
+        db.add(wallet_transaction)
+
+        # 5. Commit everything together
         db.commit()
         db.refresh(order)
 
     except Exception:
         db.rollback()
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Order failed, please try again")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Order failed, please try again",
+        )
 
     return schemas.OrderOut(
         id=order.id,
