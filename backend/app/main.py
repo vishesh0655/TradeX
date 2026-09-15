@@ -262,6 +262,19 @@ def sell_stock(
         )
         db.add(order)
 
+        # Flush so PostgreSQL generates order.id
+        db.flush()
+
+        # Create wallet transaction
+        wallet_transaction = models.WalletTransaction(
+            wallet_id=wallet.id,
+            transaction_type="SELL",
+            amount=total_proceeds,
+            balance_after=wallet.balance,
+            reference_id=order.id,
+        )
+        db.add(wallet_transaction)
+
         db.commit()
         db.refresh(order)
 
