@@ -37,18 +37,89 @@ class Wallet(Base):
     __tablename__ = "wallets"
 
     id = Column(BigInteger, primary_key=True)
-    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
-    balance = Column(Numeric(14, 2), nullable=False, server_default=text("1000000.00"))
-    currency = Column(CHAR(3), nullable=False, server_default=text("'INR'"))
-    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
-    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    user_id = Column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+    )
+    balance = Column(
+        Numeric(14, 2),
+        nullable=False,
+        server_default=text("1000000.00"),
+    )
+    currency = Column(
+        CHAR(3),
+        nullable=False,
+        server_default=text("'INR'"),
+    )
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    updated_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
 
     __table_args__ = (
-        CheckConstraint("balance >= 0", name="wallets_balance_check"),
+        CheckConstraint(
+            "balance >= 0",
+            name="wallets_balance_check",
+        ),
     )
 
     user = relationship("User", back_populates="wallet")
 
+    transactions = relationship(
+        "WalletTransaction",
+        back_populates="wallet",
+        cascade="all, delete-orphan",
+    )
+
+class WalletTransaction(Base):
+    __tablename__ = "wallet_transactions"
+
+    id = Column(BigInteger, primary_key=True)
+
+    wallet_id = Column(
+        BigInteger,
+        ForeignKey("wallets.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    transaction_type = Column(String(30), nullable=False)
+
+    amount = Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
+
+    balance_after = Column(
+        Numeric(14, 2),
+        nullable=False,
+    )
+
+    reference_id = Column(
+        BigInteger,
+        ForeignKey("orders.id"),
+        nullable=True,
+    )
+
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    wallet = relationship(
+        "Wallet",
+        back_populates="transactions",
+    )
+
+    order = relationship("Order")
 
 class Stock(Base):
     __tablename__ = "stocks"
