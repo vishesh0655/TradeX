@@ -1,13 +1,17 @@
 import { useState } from 'react'
+import './Auth.css'
 
-function Login({ onLoginSuccess, onSwitchToRegister }) { 
+function Login({ onLoginSuccess, onSwitchToRegister }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [showPassword, setShowPassword] = useState(false)
+  const [loading, setLoading] = useState(false)
 
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+    setLoading(true)
 
     try {
       const response = await fetch(`${import.meta.env.VITE_API_URL}/login`, {
@@ -22,41 +26,254 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
       }
 
       const data = await response.json()
+
       localStorage.setItem('token', data.access_token)
+
       onLoginSuccess()
     } catch (err) {
       setError(err.message)
+    } finally {
+      setLoading(false)
     }
   }
 
   return (
-    <div>
-      <h2>Login</h2>
-      <form onSubmit={handleSubmit}>
-        <div>
-          <label>Email:</label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            required
-          />
+    <div className="auth-page">
+      <div className="auth-scene">
+        <div className="auth-glow auth-glow-one" />
+        <div className="auth-glow auth-glow-two" />
+
+        <div className="auth-ticker auth-ticker-top">
+          <span><b>NIFTY 50</b> 24,812.35 <i className="up">▲0.42%</i></span>
+          <span><b>SENSEX</b> 81,205.60 <i className="up">▲0.38%</i></span>
+          <span><b>RELIANCE</b> 2,945.10 <i className="down">▼0.15%</i></span>
+          <span><b>TCS</b> 4,102.75 <i className="up">▲0.61%</i></span>
+          <span><b>INFY</b> 1,842.20 <i className="up">▲0.18%</i></span>
+
+          <span><b>NIFTY 50</b> 24,812.35 <i className="up">▲0.42%</i></span>
+          <span><b>SENSEX</b> 81,205.60 <i className="up">▲0.38%</i></span>
+          <span><b>RELIANCE</b> 2,945.10 <i className="down">▼0.15%</i></span>
+          <span><b>TCS</b> 4,102.75 <i className="up">▲0.61%</i></span>
+          <span><b>INFY</b> 1,842.20 <i className="up">▲0.18%</i></span>
         </div>
-        <div>
-          <label>Password:</label>
-          <input
-            type="password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            required
-          />
+      </div>
+
+      <div className="auth-card">
+        <div className="auth-form-panel">
+          <form onSubmit={handleSubmit} className="auth-form">
+            <div className="auth-logo">
+              <div className="auth-logo-inner">
+                <svg viewBox="0 0 24 24" fill="none">
+                  <path
+                    d="M3 16.5L9 10.5L13 13.5L20 5.5"
+                    stroke="url(#loginGradient)"
+                    strokeWidth="2.3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <path
+                    d="M14.5 5.5H20V11"
+                    stroke="url(#loginGradient)"
+                    strokeWidth="2.3"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                  <defs>
+                    <linearGradient
+                      id="loginGradient"
+                      x1="3"
+                      y1="16"
+                      x2="20"
+                      y2="5"
+                    >
+                      <stop stopColor="#0e9f86" />
+                      <stop offset="1" stopColor="#3b6fe0" />
+                    </linearGradient>
+                  </defs>
+                </svg>
+              </div>
+            </div>
+
+            <h1 className="auth-title">Welcome back</h1>
+            <p className="auth-subtitle">
+              Sign in to your TradeX account
+            </p>
+
+            <div className="auth-input-group">
+              <span className="auth-input-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <path d="M22 6 12 13 2 6" />
+                  <path d="M2 6h20v12H2z" />
+                </svg>
+              </span>
+
+              <input
+                type="email"
+                placeholder=" "
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                autoComplete="email"
+                required
+              />
+
+              <label>Email address</label>
+            </div>
+
+            <div className="auth-input-group">
+              <span className="auth-input-icon">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                  <rect x="4" y="10" width="16" height="10" rx="2" />
+                  <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+                </svg>
+              </span>
+
+              <input
+                type={showPassword ? 'text' : 'password'}
+                placeholder=" "
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+              />
+
+              <label>Password</label>
+
+              <button
+                type="button"
+                className="password-toggle"
+                onClick={() => setShowPassword(!showPassword)}
+                aria-label={showPassword ? 'Hide password' : 'Show password'}
+              >
+                {showPassword ? '🙈' : '👁'}
+              </button>
+            </div>
+
+            <div className="auth-row-between">
+              <label className="remember-box">
+                <input type="checkbox" />
+                <span className="custom-checkbox" />
+                Remember me
+              </label>
+
+              <button
+                type="button"
+                className="auth-link"
+                onClick={() => {}}
+              >
+                Forgot password?
+              </button>
+            </div>
+
+            {error && (
+              <div className="auth-status auth-error">
+                {error}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              className={`auth-button ${loading ? 'loading' : ''}`}
+              disabled={loading}
+            >
+              {loading ? (
+                <span className="auth-spinner" />
+              ) : (
+                'Continue to TradeX'
+              )}
+            </button>
+
+            <div className="trust-row">
+              <span>
+                <i /> Virtual funds
+              </span>
+              <span>
+                <i /> Paper trading
+              </span>
+              <span>
+                <i /> Built for practice
+              </span>
+            </div>
+
+            <div className="auth-divider">
+              <span>or continue with</span>
+            </div>
+
+            <div className="social-row">
+              <button type="button" className="social-button">
+                Google
+              </button>
+
+              <button type="button" className="social-button">
+                Apple
+              </button>
+            </div>
+
+            <div className="mobile-switch">
+              New here?{' '}
+              <button
+                type="button"
+                className="auth-link"
+                onClick={onSwitchToRegister}
+              >
+                Create account
+              </button>
+            </div>
+          </form>
         </div>
-        {error && <p style={{ color: 'red' }}>{error}</p>}
-        <button type="submit">Login</button>
-      </form>
-      <p>
-        Don't have an account? <button type="button" onClick={() => { console.log('Register clicked'); onSwitchToRegister(); }}>Register</button>
-      </p>
+
+        <div className="auth-overlay">
+          <div className="feature-strip">
+            <span>PAPER TRADING</span>
+            <span>LIVE UI</span>
+          </div>
+
+          <div className="floating-orb orb-one" />
+          <div className="floating-orb orb-two" />
+
+          <div className="market-mini">
+            <div className="market-top">
+              <span>NIFTY 50 · DEMO</span>
+              <span className="live-pill">
+                <i /> MARKET PULSE
+              </span>
+            </div>
+
+            <svg className="spark-chart" viewBox="0 0 250 48">
+              <path
+                className="spark-area"
+                d="M0 40 L18 34 L34 37 L52 27 L70 31 L89 20 L108 25 L127 14 L145 21 L164 12 L182 17 L202 7 L221 13 L250 3 L250 48 L0 48 Z"
+              />
+              <path
+                d="M0 40 L18 34 L34 37 L52 27 L70 31 L89 20 L108 25 L127 14 L145 21 L164 12 L182 17 L202 7 L221 13 L250 3"
+              />
+            </svg>
+
+            <div className="market-bottom">
+              <span>Virtual portfolio</span>
+              <span>+0.42%</span>
+            </div>
+          </div>
+
+          <div className="overlay-content">
+            <span className="overlay-brand">TRADEX</span>
+
+            <h2>New to TradeX?</h2>
+
+            <p>
+              Create a free account and start paper trading
+              with a virtual portfolio.
+            </p>
+
+            <button
+              type="button"
+              className="overlay-button"
+              onClick={onSwitchToRegister}
+            >
+              Sign up
+            </button>
+          </div>
+        </div>
+      </div>
     </div>
   )
 }
