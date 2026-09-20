@@ -1938,3 +1938,10 @@
     display: none;
   }
 }
+.google-login-button {
+  min-width: 180px;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './Auth.css'
 
 function Login({ onLoginSuccess, onSwitchToRegister }) {
@@ -7,6 +7,100 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
   const [error, setError] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
+
+  const googleButtonRef = useRef(null)
+
+  const handleGoogleResponse = async (response) => {
+    setError('')
+    setGoogleLoading(true)
+
+    try {
+      const result = await fetch(
+        `${import.meta.env.VITE_API_URL}/auth/google`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            credential: response.credential,
+          }),
+        }
+      )
+
+      const data = await result.json()
+
+      if (!result.ok) {
+        throw new Error(data.detail || 'Google login failed')
+      }
+
+      localStorage.setItem('token', data.access_token)
+
+      onLoginSuccess()
+    } catch (err) {
+      setError(err.message || 'Google login failed')
+    } finally {
+      setGoogleLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    const initializeGoogle = () => {
+      if (!window.google || !googleButtonRef.current) {
+        return
+      }
+
+      google.accounts.id.initialize({
+        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+        callback: handleGoogleResponse,
+      })
+
+      googleButtonRef.current.innerHTML = ''
+
+      google.accounts.id.renderButton(
+        googleButtonRef.current,
+        {
+          theme: 'outline',
+          size: 'large',
+          width: 180,
+          text: 'continue_with',
+          shape: 'rectangular',
+          logo_alignment: 'left',
+        }
+      )
+    }
+
+    if (window.google) {
+      initializeGoogle()
+      return
+    }
+
+    const existingScript = document.querySelector(
+      'script[src="https://accounts.google.com/gsi/client"]'
+    )
+
+    if (existingScript) {
+      existingScript.addEventListener('load', initializeGoogle)
+
+      return () => {
+        existingScript.removeEventListener('load', initializeGoogle)
+      }
+    }
+
+    const script = document.createElement('script')
+
+    script.src = 'https://accounts.google.com/gsi/client'
+    script.async = true
+    script.defer = true
+    script.onload = initializeGoogle
+
+    document.head.appendChild(script)
+
+    return () => {
+      script.onload = null
+    }
+  }, [])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -14,11 +108,16 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
     setLoading(true)
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password }),
-      })
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/login`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ email, password }),
+        }
+      )
 
       if (!response.ok) {
         const errorData = await response.json()
@@ -44,17 +143,37 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
         <div className="auth-glow auth-glow-two" />
 
         <div className="auth-ticker auth-ticker-top">
-          <span><b>NIFTY 50</b> 24,812.35 <i className="up">▲0.42%</i></span>
-          <span><b>SENSEX</b> 81,205.60 <i className="up">▲0.38%</i></span>
-          <span><b>RELIANCE</b> 2,945.10 <i className="down">▼0.15%</i></span>
-          <span><b>TCS</b> 4,102.75 <i className="up">▲0.61%</i></span>
-          <span><b>INFY</b> 1,842.20 <i className="up">▲0.18%</i></span>
+          <span>
+            <b>NIFTY 50</b> 24,812.35 <i className="up">▲0.42%</i>
+          </span>
+          <span>
+            <b>SENSEX</b> 81,205.60 <i className="up">▲0.38%</i>
+          </span>
+          <span>
+            <b>RELIANCE</b> 2,945.10 <i className="down">▼0.15%</i>
+          </span>
+          <span>
+            <b>TCS</b> 4,102.75 <i className="up">▲0.61%</i>
+          </span>
+          <span>
+            <b>INFY</b> 1,842.20 <i className="up">▲0.18%</i>
+          </span>
 
-          <span><b>NIFTY 50</b> 24,812.35 <i className="up">▲0.42%</i></span>
-          <span><b>SENSEX</b> 81,205.60 <i className="up">▲0.38%</i></span>
-          <span><b>RELIANCE</b> 2,945.10 <i className="down">▼0.15%</i></span>
-          <span><b>TCS</b> 4,102.75 <i className="up">▲0.61%</i></span>
-          <span><b>INFY</b> 1,842.20 <i className="up">▲0.18%</i></span>
+          <span>
+            <b>NIFTY 50</b> 24,812.35 <i className="up">▲0.42%</i>
+          </span>
+          <span>
+            <b>SENSEX</b> 81,205.60 <i className="up">▲0.38%</i>
+          </span>
+          <span>
+            <b>RELIANCE</b> 2,945.10 <i className="down">▼0.15%</i>
+          </span>
+          <span>
+            <b>TCS</b> 4,102.75 <i className="up">▲0.61%</i>
+          </span>
+          <span>
+            <b>INFY</b> 1,842.20 <i className="up">▲0.18%</i>
+          </span>
         </div>
       </div>
 
@@ -95,13 +214,18 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
             </div>
 
             <h1 className="auth-title">Welcome back</h1>
+
             <p className="auth-subtitle">
               Sign in to your TradeX account
             </p>
 
             <div className="auth-input-group">
               <span className="auth-input-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                >
                   <path d="M22 6 12 13 2 6" />
                   <path d="M2 6h20v12H2z" />
                 </svg>
@@ -121,7 +245,11 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
 
             <div className="auth-input-group">
               <span className="auth-input-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
+                <svg
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                >
                   <rect x="4" y="10" width="16" height="10" rx="2" />
                   <path d="M8 10V7a4 4 0 0 1 8 0v3" />
                 </svg>
@@ -142,7 +270,9 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
                 type="button"
                 className="password-toggle"
                 onClick={() => setShowPassword(!showPassword)}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
+                aria-label={
+                  showPassword ? 'Hide password' : 'Show password'
+                }
               >
                 {showPassword ? '🙈' : '👁'}
               </button>
@@ -173,7 +303,7 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
             <button
               type="submit"
               className={`auth-button ${loading ? 'loading' : ''}`}
-              disabled={loading}
+              disabled={loading || googleLoading}
             >
               {loading ? (
                 <span className="auth-spinner" />
@@ -186,9 +316,11 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
               <span>
                 <i /> Virtual funds
               </span>
+
               <span>
                 <i /> Paper trading
               </span>
+
               <span>
                 <i /> Built for practice
               </span>
@@ -199,14 +331,26 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
             </div>
 
             <div className="social-row">
-              <button type="button" className="social-button">
-                Google
-              </button>
+              <div
+                ref={googleButtonRef}
+                className="google-login-button"
+              />
 
-              <button type="button" className="social-button">
+              <button
+                type="button"
+                className="social-button"
+                disabled
+                title="Apple Sign In coming soon"
+              >
                 Apple
               </button>
             </div>
+
+            {googleLoading && (
+              <div className="auth-status">
+                Signing in with Google...
+              </div>
+            )}
 
             <div className="mobile-switch">
               New here?{' '}
@@ -233,6 +377,7 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
           <div className="market-mini">
             <div className="market-top">
               <span>NIFTY 50 · DEMO</span>
+
               <span className="live-pill">
                 <i /> MARKET PULSE
               </span>
@@ -243,6 +388,7 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
                 className="spark-area"
                 d="M0 40 L18 34 L34 37 L52 27 L70 31 L89 20 L108 25 L127 14 L145 21 L164 12 L182 17 L202 7 L221 13 L250 3 L250 48 L0 48 Z"
               />
+
               <path
                 d="M0 40 L18 34 L34 37 L52 27 L70 31 L89 20 L108 25 L127 14 L145 21 L164 12 L182 17 L202 7 L221 13 L250 3"
               />

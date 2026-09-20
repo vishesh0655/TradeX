@@ -1,3 +1,7 @@
+import os
+
+from google.oauth2 import id_token
+from google.auth.transport import requests
 from fastapi import Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
@@ -95,6 +99,130 @@ def login_user(payload: schemas.UserLogin, db: Session = Depends(get_db)):
 
     access_token = create_access_token(user_id=user.id)
     return {"access_token": access_token, "token_type": "bearer"}
+@app.post("/auth/google", response_model=schemas.Token)
+def google_login(
+    payload: schemas.SocialAuthRequest,
+    db: Session = Depends(get_db),
+):
+    try:
+        google_user = id_token.verify_oauth2_token(
+            payload.credential,
+            requests.Request(),
+            os.environ["GOOGLE_CLIENT_ID"],
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Google credential",
+        )
+
+    if google_user.get("iss") not in (
+        "accounts.google.com",
+        "https://accounts.google.com",
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Google issuer",
+        )
+
+    google_sub = google_user.get("sub")
+    email = google_user.get("email")
+    name = google_user.get("name") or "TradeX User"
+    email_verified = google_user.get("email_verified", False)
+
+    if not google_sub or not email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Google account information is incomplete",
+        )
+
+    if not email_verified:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Google email is not verified",
+        )
+
+    identity = (
+        db.query(models.UserIdentity)
+        .filter(
+            models.UserIdentity.provider == "google",
+            models.UserIdentity.provider_subject == google_sub,
+        )
+        .first()
+    )
+
+    if identity:
+        user = identity.user
+
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is inactive",
+            )
+
+        access_token = create_access_token(user_id=user.id)
+
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+        }
+
+    user = (
+        db.query(models.User)
+        .filter(models.User.email == email)
+        .first()
+    )
+
+    try:
+        if not user:
+            user = models.User(
+                name=name,
+                email=email,
+                password_hash=None,
+            )
+
+            db.add(user)
+            db.flush()
+
+            wallet = models.Wallet(
+                user_id=user.id,
+            )
+
+            db.add(wallet)
+
+        else:
+            if not user.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Account is inactive",
+                )
+
+        identity = models.UserIdentity(
+            user_id=user.id,
+            provider="google",
+            provider_subject=google_sub,
+        )
+
+        db.add(identity)
+        db.commit()
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Google login failed",
+        )
+
+    access_token = create_access_token(user_id=user.id)
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+    }
 @app.get("/me", response_model=schemas.UserOut)
 def read_current_user(current_user: models.User = Depends(get_current_user)):
     return schemas.UserOut(

@@ -24,14 +24,57 @@ class User(Base):
     id = Column(BigInteger, primary_key=True)
     name = Column(String(100), nullable=False)
     email = Column(String(255), nullable=False, unique=True)
-    password_hash = Column(String(255), nullable=False)
+    password_hash = Column(String(255), nullable=True)
     is_active = Column(Boolean, nullable=False, server_default=text("true"))
     created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
 
     wallet = relationship("Wallet", back_populates="user", uselist=False)
     orders = relationship("Order", back_populates="user")
     holdings = relationship("Holding", back_populates="user")
+    identities = relationship(
+    "UserIdentity",
+    back_populates="user",
+    cascade="all, delete-orphan",
+)
+class UserIdentity(Base):
+    __tablename__ = "user_identities"
 
+    id = Column(BigInteger, primary_key=True)
+
+    user_id = Column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+
+    provider = Column(
+        String(20),
+        nullable=False,
+    )
+
+    provider_subject = Column(
+        String(255),
+        nullable=False,
+    )
+
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+
+    __table_args__ = (
+        UniqueConstraint(
+            "provider",
+            "provider_subject",
+            name="user_identities_provider_subject_key",
+        ),
+    )
+
+    user = relationship(
+        "User",
+        back_populates="identities",
+    )
 
 class Wallet(Base):
     __tablename__ = "wallets"

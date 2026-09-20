@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import './Auth.css'
 
 function Register({ onRegisterSuccess, onSwitchToLogin }) {
@@ -9,6 +9,103 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
   const [success, setSuccess] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [googleLoading, setGoogleLoading] = useState(false)
+
+  const googleButtonRef = useRef(null)
+
+  const handleGoogleResponse = async (response) => {
+    setError('')
+    setSuccess(false)
+    setGoogleLoading(true)
+
+    try {
+      const result = await fetch(
+        `${import.meta.env.VITE_API_URL}/auth/google`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            credential: response.credential,
+          }),
+        }
+      )
+
+      const data = await result.json()
+
+      if (!result.ok) {
+        throw new Error(data.detail || 'Google signup failed')
+      }
+
+      localStorage.setItem('token', data.access_token)
+
+      if (onRegisterSuccess) {
+        onRegisterSuccess()
+      }
+    } catch (err) {
+      setError(err.message || 'Google signup failed')
+    } finally {
+      setGoogleLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    const initializeGoogle = () => {
+      if (!window.google || !googleButtonRef.current) {
+        return
+      }
+
+      google.accounts.id.initialize({
+        client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+        callback: handleGoogleResponse,
+      })
+
+      googleButtonRef.current.innerHTML = ''
+
+      google.accounts.id.renderButton(
+        googleButtonRef.current,
+        {
+          theme: 'outline',
+          size: 'large',
+          width: 180,
+          text: 'signup_with',
+          shape: 'rectangular',
+          logo_alignment: 'left',
+        }
+      )
+    }
+
+    if (window.google) {
+      initializeGoogle()
+      return
+    }
+
+    const existingScript = document.querySelector(
+      'script[src="https://accounts.google.com/gsi/client"]'
+    )
+
+    if (existingScript) {
+      existingScript.addEventListener('load', initializeGoogle)
+
+      return () => {
+        existingScript.removeEventListener('load', initializeGoogle)
+      }
+    }
+
+    const script = document.createElement('script')
+
+    script.src = 'https://accounts.google.com/gsi/client'
+    script.async = true
+    script.defer = true
+    script.onload = initializeGoogle
+
+    document.head.appendChild(script)
+
+    return () => {
+      script.onload = null
+    }
+  }, [])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -201,7 +298,7 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
             <button
               type="submit"
               className={`auth-button ${loading ? 'loading' : ''}`}
-              disabled={loading}
+              disabled={loading || googleLoading}
             >
               {loading ? (
                 <span className="auth-spinner" />
@@ -227,14 +324,26 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
             </div>
 
             <div className="social-row">
-              <button type="button" className="social-button">
-                Google
-              </button>
+              <div
+                ref={googleButtonRef}
+                className="google-login-button"
+              />
 
-              <button type="button" className="social-button">
+              <button
+                type="button"
+                className="social-button"
+                disabled
+                title="Apple Sign In coming soon"
+              >
                 Apple
               </button>
             </div>
+
+            {googleLoading && (
+              <div className="auth-status">
+                Creating your TradeX account with Google...
+              </div>
+            )}
 
             <div className="mobile-switch">
               Already have an account?{' '}

@@ -19,6 +19,8 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
+class SocialAuthRequest(BaseModel):
+    credential: str
 
 class Token(BaseModel):
     access_token: str
