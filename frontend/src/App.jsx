@@ -126,6 +126,7 @@ function App() {
         <Register
           onRegisterSuccess={() => setAuthView('login')}
           onSwitchToLogin={() => setAuthView('login')}
+          onSwitchToPhone={() => setAuthView('phone')}
         />
       )
     }

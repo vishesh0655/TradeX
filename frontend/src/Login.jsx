@@ -178,17 +178,65 @@ rememberMeRef.current = rememberMe
         onLoginSuccess()
       }
     } catch (err) {
-      const messages = {
-        'auth/invalid-credential': 'Incorrect email or password.',
-        'auth/user-not-found': 'No account found with this email.',
-        'auth/wrong-password': 'Incorrect email or password.',
-        'auth/invalid-email': 'Please enter a valid email address.',
-        'auth/user-disabled': 'This account has been disabled.',
-        'auth/too-many-requests': 'Too many attempts. Please try again later.',
-        'auth/network-request-failed': 'Network error. Check your internet connection.',
-      }
+      // If Firebase doesn't recognize this login, try the legacy
+      // PostgreSQL-backed TradeX login for accounts created before Firebase.
+      const shouldTryLegacyLogin = [
+        'auth/invalid-credential',
+        'auth/user-not-found',
+        'auth/wrong-password',
+      ].includes(err.code)
 
-      setError(messages[err.code] || err.message || 'Login failed')
+      if (shouldTryLegacyLogin) {
+        try {
+          const legacyResponse = await fetch(
+            `${import.meta.env.VITE_API_URL}/login`,
+            {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                email: email.trim(),
+                password,
+              }),
+            }
+          )
+
+          const legacyData = await legacyResponse.json()
+
+          if (legacyResponse.ok) {
+            saveAuthToken(legacyData.access_token)
+
+            if (onLoginSuccess) {
+              onLoginSuccess()
+            }
+            return
+          }
+
+          // Prefer the legacy API's error when it also rejects the credentials.
+          setError(
+            legacyData.detail ||
+              'Incorrect email or password. If this is a newer account, use your Firebase password.'
+          )
+        } catch (legacyErr) {
+          setError(
+            legacyErr.message ||
+              'Could not connect to TradeX. Check your internet connection and try again.'
+          )
+        }
+      } else {
+        const messages = {
+          'auth/invalid-credential': 'Incorrect email or password.',
+          'auth/user-not-found': 'No account found with this email.',
+          'auth/wrong-password': 'Incorrect email or password.',
+          'auth/invalid-email': 'Please enter a valid email address.',
+          'auth/user-disabled': 'This account has been disabled.',
+          'auth/too-many-requests': 'Too many attempts. Please try again later.',
+          'auth/network-request-failed': 'Network error. Check your internet connection.',
+        }
+
+        setError(messages[err.code] || err.message || 'Login failed')
+      }
     } finally {
       setLoading(false)
     }

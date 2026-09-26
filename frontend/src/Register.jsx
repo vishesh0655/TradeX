@@ -1,7 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  createUserWithEmailAndPassword,
+  sendEmailVerification,
+  updateProfile,
+  reload,
+  getIdToken,
+} from 'firebase/auth'
+import { auth } from './firebase'
 import './Auth.css'
 
-function Register({ onRegisterSuccess, onSwitchToLogin }) {
+function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -10,6 +18,7 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
+  const [verificationSent, setVerificationSent] = useState(false)
 
   const googleButtonRef = useRef(null)
 
@@ -108,44 +117,141 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
   }, [])
 
   const handleSubmit = async (e) => {
-    e.preventDefault()
+  e.preventDefault()
 
+  setError('')
+  setSuccess(false)
+  setLoading(true)
+
+  try {
+    const userCredential = await createUserWithEmailAndPassword(
+      auth,
+      email.trim(),
+      password
+    )
+
+    await updateProfile(userCredential.user, {
+      displayName: name.trim(),
+    })
+
+    await sendEmailVerification(userCredential.user, {
+      url: window.location.origin,
+      handleCodeInApp: false,
+    })
+
+    setVerificationSent(true)
+    setSuccess(true)
+    setPassword('')
+  } catch (err) {
+    const messages = {
+      'auth/email-already-in-use': 'This email is already registered. Please sign in.',
+      'auth/invalid-email': 'Please enter a valid email address.',
+      'auth/weak-password': 'Password must be at least 6 characters.',
+      'auth/too-many-requests': 'Too many attempts. Please try again later.',
+    }
+
+    setError(messages[err.code] || err.message || 'Registration failed')
+  } finally {
+    setLoading(false)
+  }
+}
+
+  const handleConfirmVerification = async () => {
     setError('')
-    setSuccess(false)
     setLoading(true)
 
     try {
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/register`,
+      const user = auth.currentUser
+
+      if (!user) {
+        throw new Error(
+          'Your signup session has expired. Please sign up again.'
+        )
+      }
+
+      // Refresh Firebase user status after email verification
+      await reload(user)
+
+      if (!user.emailVerified) {
+        setError(
+          'Email not verified yet. Please verify your email first, then try again.'
+        )
+        return
+      }
+
+      // Get a fresh Firebase ID token
+      const firebaseToken = await getIdToken(user, true)
+
+      // Send verified identity to TradeX backend
+      const result = await fetch(
+        `${import.meta.env.VITE_API_URL}/auth/email`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            name,
-            email,
-            password,
+            credential: firebaseToken,
           }),
         }
       )
 
-      const data = await response.json()
+      const data = await result.json()
 
-      if (!response.ok) {
-        throw new Error(data.detail || 'Registration failed')
+      if (!result.ok) {
+        throw new Error(
+          data.detail || 'Failed to create your TradeX account.'
+        )
       }
 
-      setSuccess(true)
-      setName('')
-      setEmail('')
-      setPassword('')
+      // Save TradeX JWT
+      localStorage.setItem('token', data.access_token)
 
+      // Continue to the app
       if (onRegisterSuccess) {
         onRegisterSuccess()
       }
     } catch (err) {
-      setError(err.message)
+      setError(
+        err.message || 'Email verification failed. Please try again.'
+      )
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResendVerification = async () => {
+    setError('')
+    setLoading(true)
+
+    try {
+      const user = auth.currentUser
+
+      if (!user) {
+        throw new Error(
+          'Signup session expired. Please sign up again.'
+        )
+      }
+
+      await reload(user)
+
+      if (user.emailVerified) {
+        setError(
+          'Your email is already verified. Click the verification button to continue.'
+        )
+        return
+      }
+
+      await sendEmailVerification(user, {
+        url: window.location.origin,
+        handleCodeInApp: false,
+      })
+
+      setVerificationSent(true)
+    } catch (err) {
+      setError(
+        err.message || 'Could not resend the verification email.'
+      )
     } finally {
       setLoading(false)
     }
@@ -289,9 +395,34 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
               </div>
             )}
 
-            {success && (
+            {verificationSent && (
               <div className="auth-status auth-success">
-                Account created! You can now log in.
+                <p>
+                  Verification email sent to {email}.
+                  Please check your inbox and spam folder.
+                </p>
+
+                <button
+                  type="button"
+                  className="auth-button"
+                  onClick={handleConfirmVerification}
+                  disabled={loading || googleLoading}
+                >
+                  {loading ? (
+                    <span className="auth-spinner" />
+                  ) : (
+                    "I've verified my email"
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  className="auth-link"
+                  onClick={handleResendVerification}
+                  disabled={loading || googleLoading}
+                >
+                  Resend verification email
+                </button>
               </div>
             )}
 
@@ -328,6 +459,14 @@ function Register({ onRegisterSuccess, onSwitchToLogin }) {
                 ref={googleButtonRef}
                 className="google-login-button"
               />
+
+              <button
+                type="button"
+                className="social-button"
+                onClick={onSwitchToPhone}
+              >
+                Continue with phone
+              </button>
 
               <button
                 type="button"
