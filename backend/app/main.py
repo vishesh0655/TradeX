@@ -1,5 +1,6 @@
 import os
-
+import firebase_admin
+from firebase_admin import auth as firebase_auth
 from google.oauth2 import id_token
 from google.auth.transport import requests
 from fastapi import Depends, HTTPException, status
@@ -14,6 +15,8 @@ from sqlalchemy import text
 from app.database import engine
 
 app = FastAPI(title="TradeX API")
+if not firebase_admin._apps:
+    firebase_admin.initialize_app()
 from fastapi.middleware.cors import CORSMiddleware
 
 app.add_middleware(
@@ -99,6 +102,131 @@ def login_user(payload: schemas.UserLogin, db: Session = Depends(get_db)):
 
     access_token = create_access_token(user_id=user.id)
     return {"access_token": access_token, "token_type": "bearer"}
+@app.post("/auth/phone", response_model=schemas.Token)
+def phone_login(
+    payload: schemas.SocialAuthRequest,
+    db: Session = Depends(get_db),
+):
+    # 1. Verify Firebase ID token
+    try:
+        decoded_token = firebase_auth.verify_id_token(
+            payload.credential
+        )
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired Firebase credential",
+        )
+
+    # 2. Confirm this was a phone authentication
+    firebase_claims = decoded_token.get("firebase", {})
+    sign_in_provider = firebase_claims.get("sign_in_provider")
+
+    phone_number = decoded_token.get("phone_number")
+    firebase_uid = decoded_token.get("uid")
+
+    if (
+        sign_in_provider != "phone"
+        or not phone_number
+        or not firebase_uid
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Verified phone authentication is required",
+        )
+
+    # 3. Find an existing TradeX phone identity
+    identity = (
+        db.query(models.UserIdentity)
+        .filter(
+            models.UserIdentity.provider == "phone",
+            models.UserIdentity.provider_subject == firebase_uid,
+        )
+        .first()
+    )
+
+    if identity:
+        user = identity.user
+
+        if not user.is_active:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Account is inactive",
+            )
+
+        access_token = create_access_token(user_id=user.id)
+
+        return {
+            "access_token": access_token,
+            "token_type": "bearer",
+        }
+
+    # 4. Create a new user for a first-time phone login
+    try:
+        phone_digits = "".join(
+            char for char in phone_number if char.isdigit()
+        )
+
+        # User.email is currently required and unique in your database.
+        # Use a deterministic internal email for phone-only accounts.
+        internal_email = f"phone_{phone_digits}@phone.tradex.local"
+
+        user = (
+            db.query(models.User)
+            .filter(models.User.email == internal_email)
+            .first()
+        )
+
+        if user:
+            if not user.is_active:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Account is inactive",
+                )
+        else:
+            user = models.User(
+                name="TradeX User",
+                email=internal_email,
+                password_hash=None,
+            )
+
+            db.add(user)
+            db.flush()
+
+            wallet = models.Wallet(
+                user_id=user.id,
+            )
+
+            db.add(wallet)
+
+        # 5. Save the Firebase identity
+        identity = models.UserIdentity(
+            user_id=user.id,
+            provider="phone",
+            provider_subject=firebase_uid,
+        )
+
+        db.add(identity)
+        db.commit()
+
+    except HTTPException:
+        db.rollback()
+        raise
+
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Phone login failed",
+        )
+
+    # 6. Return the normal TradeX JWT
+    access_token = create_access_token(user_id=user.id)
+
+    return {
+        "access_token": access_token,
+        "token_type": "bearer",
+    }
 @app.post("/auth/google", response_model=schemas.Token)
 def google_login(
     payload: schemas.SocialAuthRequest,

@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import './Auth.css'
-
-function Login({ onLoginSuccess, onSwitchToRegister }) {
+function Login({ onLoginSuccess, onSwitchToRegister, onSwitchToPhone }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
@@ -355,10 +354,9 @@ rememberMeRef.current = rememberMe
               <button
                 type="button"
                 className="social-button"
-                disabled
-                title="Apple Sign In coming soon"
+                onClick={onSwitchToPhone}
               >
-                Apple
+                Continue with phone
               </button>
             </div>
 

@@ -1945,3 +1945,580 @@
   align-items: center;
   justify-content: center;
 }
+/* Phone login layout */
+.phone-login {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin-top: 8px;
+}
+
+.phone-login form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.phone-login label {
+  display: block;
+  position: static;
+  color: #cbd5e1;
+  font-size: 14px;
+  font-weight: 500;
+  text-align: left;
+  transform: none;
+}
+
+.phone-login .phone-input-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.phone-login .phone-input-row span {
+  flex: 0 0 55px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 46px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04);
+  color: #e2e8f0;
+  font-size: 15px;
+}
+
+.phone-login input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: 46px;
+  padding: 0 14px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: #1e293b;
+  color: #f8fafc;
+  font-size: 15px;
+  outline: none;
+}
+
+.phone-login input:focus {
+  border-color: #22b8cf;
+}
+
+.phone-login .phone-input-row input {
+  flex: 1;
+}
+
+.phone-login button {
+  width: 100%;
+  min-height: 44px;
+  border: none;
+  border-radius: 10px;
+  background: linear-gradient(100deg, #0e9f86, #2796df);
+  color: white;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.phone-login button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.phone-login button[type="button"] {
+  background: transparent;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.phone-login .auth-status {
+  margin: 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+/* =========================================================
+   TRADEX PHONE LOGIN — ISOLATED LAYOUT FIX
+   Does not affect Login or Register pages
+   ========================================================= */
+
+.phone-auth-page {
+  box-sizing: border-box;
+  min-height: 100dvh;
+  height: auto;
+  padding: 24px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+/* Single centered card instead of two-panel card */
+
+.phone-auth-page .phone-auth-card {
+  width: 100%;
+  max-width: 480px;
+
+  height: auto;
+  max-height: none;
+  min-height: 0;
+
+  margin: 0 auto;
+
+  display: flex;
+  flex-direction: column;
+
+  overflow: visible;
+  border-radius: 24px;
+}
+
+/* Full-width form panel */
+
+.phone-auth-page .phone-auth-panel {
+  width: 100%;
+  height: auto;
+  min-height: 0;
+
+  box-sizing: border-box;
+
+  padding: 42px 40px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 24px;
+
+  overflow: visible;
+}
+
+/* Keep the form at a comfortable readable width */
+
+.phone-auth-page .phone-auth-form {
+  width: 100%;
+  max-width: 360px;
+  min-width: 0;
+
+  margin: 0 auto;
+
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+
+  text-align: center;
+}
+
+.phone-auth-page .auth-title {
+  margin-top: 0;
+  margin-bottom: 8px;
+
+  font-size: 29px;
+  text-align: center;
+}
+
+.phone-auth-page .auth-subtitle {
+  width: 100%;
+
+  margin: 0 0 24px;
+
+  font-size: 13.5px;
+  line-height: 1.6;
+
+  text-align: center;
+}
+
+/* =========================================================
+   PHONE NUMBER / OTP FORM
+   ========================================================= */
+
+.phone-auth-page .phone-login {
+  width: 100%;
+  min-width: 0;
+
+  margin-top: 0;
+
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+
+  text-align: left;
+}
+
+.phone-auth-page .phone-login form {
+  width: 100%;
+  min-width: 0;
+
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.phone-auth-page .phone-login label {
+  width: 100%;
+  margin: 0;
+
+  display: block;
+
+  color: #cbd5e1;
+  font-size: 14px;
+  line-height: 1.5;
+  font-weight: 500;
+
+  text-align: left;
+}
+
+/* Country code and number on the SAME row */
+
+.phone-auth-page .phone-login .phone-input-row {
+  width: 100%;
+  min-width: 0;
+
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+
+  gap: 10px;
+}
+
+/* +91 country code box */
+
+.phone-auth-page .phone-login .phone-input-row span {
+  flex: 0 0 64px;
+  width: 64px;
+  min-width: 64px;
+
+  height: 48px;
+  box-sizing: border-box;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid var(--auth-input-border);
+  border-radius: 12px;
+
+  background: rgba(255, 255, 255, 0.055);
+
+  color: var(--auth-text);
+  font-size: 15px;
+  line-height: 1;
+
+  white-space: nowrap;
+}
+
+/* Phone number and OTP inputs */
+
+.phone-auth-page .phone-login input {
+  flex: initial;
+
+  width: 100%;
+  min-width: 0;
+  height: 48px;
+
+  box-sizing: border-box;
+
+  padding: 0 15px;
+
+  border: 1px solid var(--auth-input-border);
+  border-radius: 12px;
+
+  background: var(--auth-input);
+
+  color: var(--auth-text);
+
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  line-height: normal;
+
+  outline: none;
+
+  transition:
+    border-color 0.2s ease,
+    box-shadow 0.2s ease,
+    background 0.2s ease;
+}
+
+.phone-auth-page .phone-login input::placeholder {
+  color: var(--auth-muted);
+  opacity: 1;
+}
+
+.phone-auth-page .phone-login input:focus {
+  border-color: var(--auth-accent);
+
+  background: rgba(25, 199, 165, 0.045);
+
+  box-shadow: 0 0 0 4px rgba(25, 199, 165, 0.09);
+}
+
+/* Make the phone input fill remaining row space */
+
+.phone-auth-page .phone-login .phone-input-row input {
+  flex: 1 1 0%;
+  width: 0;
+  min-width: 0;
+}
+
+/* Send OTP / Verify OTP buttons */
+
+.phone-auth-page .phone-login button {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+
+  box-sizing: border-box;
+
+  margin: 0;
+  padding: 12px 18px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: none;
+  border-radius: 12px;
+
+  background: linear-gradient(
+    110deg,
+    #0eaa91,
+    #258fd8,
+    #4f6ff0
+  );
+
+  color: #fff;
+
+  font-family: 'Inter', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+
+  cursor: pointer;
+}
+
+.phone-auth-page .phone-login button:hover:not(:disabled) {
+  filter: brightness(1.08);
+}
+
+.phone-auth-page .phone-login button:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+/* Change phone number button */
+
+.phone-auth-page .phone-login button[type="button"] {
+  min-height: 42px;
+
+  background: rgba(255, 255, 255, 0.035);
+
+  border: 1px solid var(--auth-border);
+
+  color: var(--auth-soft);
+}
+
+.phone-auth-page .phone-login button[type="button"]:hover {
+  background: rgba(255, 255, 255, 0.075);
+  color: var(--auth-text);
+}
+
+/* Error and success messages */
+
+.phone-auth-page .phone-login .auth-status {
+  width: 100%;
+  max-width: 100%;
+
+  box-sizing: border-box;
+
+  margin: 0;
+  padding: 11px 13px;
+
+  border-radius: 10px;
+
+  font-size: 12px;
+  line-height: 1.5;
+
+  overflow-wrap: anywhere;
+}
+
+/* =========================================================
+   REMEMBER ME + BACK LINK
+   ========================================================= */
+
+.phone-auth-page .phone-auth-options {
+  width: 100%;
+
+  margin-top: 18px;
+
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+}
+
+.phone-auth-page .remember-box {
+  width: auto;
+
+  display: inline-flex;
+  align-items: center;
+
+  gap: 9px;
+
+  color: var(--auth-soft);
+  font-size: 13px;
+
+  text-align: left;
+}
+
+.phone-auth-page .remember-box input {
+  width: 16px;
+  height: 16px;
+
+  min-width: 16px;
+  min-height: 16px;
+
+  margin: 0;
+
+  flex: 0 0 16px;
+
+  position: absolute;
+  opacity: 0;
+}
+
+.phone-auth-page .custom-checkbox {
+  flex: 0 0 16px;
+}
+
+.phone-auth-page .phone-auth-back {
+  align-self: center;
+
+  margin-top: 22px;
+
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+/* =========================================================
+   PHONE LOGIN — LAPTOP HEIGHT OVERRIDE
+   Must override the existing laptop media queries
+   ========================================================= */
+
+@media (min-width: 761px) {
+  .auth-page.phone-auth-page {
+    height: auto;
+    min-height: 100dvh;
+
+    padding: 24px;
+
+    align-items: center;
+    justify-content: center;
+  }
+
+  .phone-auth-page .phone-auth-card {
+    width: 100%;
+    max-width: 480px;
+
+    height: auto;
+    max-height: none;
+    min-height: 0;
+
+    display: flex;
+    flex-direction: column;
+
+    overflow: visible;
+  }
+
+  .phone-auth-page .phone-auth-panel {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+
+    padding: 42px 40px;
+
+    overflow: visible;
+
+    border-radius: 24px;
+  }
+}
+
+/* =========================================================
+   PHONE LOGIN — MOBILE
+   ========================================================= */
+
+@media (max-width: 760px) {
+  .auth-page.phone-auth-page {
+    min-height: 100dvh;
+    height: auto;
+
+    padding: 16px;
+
+    align-items: center;
+    justify-content: center;
+  }
+
+  .phone-auth-page .phone-auth-card {
+    width: 100%;
+    max-width: 440px;
+
+    height: auto;
+    max-height: none;
+    min-height: 0;
+
+    margin: 0 auto;
+
+    display: flex;
+
+    overflow: visible;
+
+    border-radius: 22px;
+  }
+
+  .phone-auth-page .phone-auth-panel {
+    width: 100%;
+
+    height: auto;
+    min-height: 0;
+
+    padding: 34px 24px;
+
+    border-radius: 22px;
+  }
+
+  .phone-auth-page .phone-auth-form {
+    width: 100%;
+    max-width: 360px;
+  }
+
+  .phone-auth-page .auth-title {
+    font-size: 26px;
+  }
+
+  .phone-auth-page .auth-subtitle {
+    margin-bottom: 22px;
+  }
+}
+
+/* Small phones */
+
+@media (max-width: 380px) {
+  .auth-page.phone-auth-page {
+    padding: 10px;
+  }
+
+  .phone-auth-page .phone-auth-panel {
+    padding: 30px 18px;
+  }
+
+  .phone-auth-page .phone-login .phone-input-row {
+    gap: 8px;
+  }
+
+  .phone-auth-page .phone-login .phone-input-row span {
+    flex-basis: 58px;
+    width: 58px;
+    min-width: 58px;
+  }
+}

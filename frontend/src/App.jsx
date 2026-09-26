@@ -1,7 +1,7 @@
-
 import { useEffect, useState } from 'react'
 import Login from './Login'
 import Register from './Register'
+import PhoneLoginPage from './PhoneLoginPage'
 import Portfolio from './Portfolio'
 import OrderHistory from './OrderHistory'
 import Trade from './Trade'
@@ -27,6 +27,39 @@ function App() {
     setWalletBalance(null)
     setIsLoggedIn(false)
     setAuthView('login')
+  }
+
+  // Handle successful phone OTP verification
+  const handlePhoneLogin = async (firebaseIdToken, rememberMe) => {
+    const response = await fetch(
+      `${import.meta.env.VITE_API_URL}/auth/phone`,
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          credential: firebaseIdToken,
+        }),
+      }
+    )
+
+    const data = await response.json()
+
+    if (!response.ok) {
+      throw new Error(data.detail || 'Phone login failed')
+    }
+
+    if (rememberMe) {
+      localStorage.setItem('token', data.access_token)
+      sessionStorage.removeItem('token')
+    } else {
+      sessionStorage.setItem('token', data.access_token)
+      localStorage.removeItem('token')
+    }
+
+    setAuthView('login')
+    setIsLoggedIn(true)
   }
 
   // Fetch available stocks
@@ -86,7 +119,7 @@ function App() {
       })
   }, [isLoggedIn, refreshTrigger])
 
-  // Show login or registration page
+  // Show authentication pages
   if (!isLoggedIn) {
     if (authView === 'register') {
       return (
@@ -97,10 +130,20 @@ function App() {
       )
     }
 
+    if (authView === 'phone') {
+      return (
+        <PhoneLoginPage
+          onPhoneLogin={handlePhoneLogin}
+          onBack={() => setAuthView('login')}
+        />
+      )
+    }
+
     return (
       <Login
         onLoginSuccess={() => setIsLoggedIn(true)}
         onSwitchToRegister={() => setAuthView('register')}
+        onSwitchToPhone={() => setAuthView('phone')}
       />
     )
   }
