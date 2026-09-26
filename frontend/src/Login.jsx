@@ -1,4 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import {
+  signInWithEmailAndPassword,
+  sendEmailVerification,
+  reload,
+  getIdToken,
+} from 'firebase/auth'
+import { auth } from './firebase'
 import './Auth.css'
 function Login({ onLoginSuccess, onSwitchToRegister, onSwitchToPhone }) {
   const [email, setEmail] = useState('')
@@ -8,6 +15,7 @@ function Login({ onLoginSuccess, onSwitchToRegister, onSwitchToPhone }) {
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
+  const [verificationUser, setVerificationUser] = useState(null)
 
   const googleButtonRef = useRef(null)
   const rememberMeRef = useRef(rememberMe)
@@ -116,32 +124,158 @@ rememberMeRef.current = rememberMe
   const handleSubmit = async (e) => {
     e.preventDefault()
     setError('')
+    setVerificationUser(null)
     setLoading(true)
 
     try {
+      // Sign in through Firebase Authentication
+      const userCredential = await signInWithEmailAndPassword(
+        auth,
+        email.trim(),
+        password
+      )
+
+      const user = userCredential.user
+
+      // Refresh Firebase user status
+      await reload(user)
+
+      if (!user.emailVerified) {
+        setVerificationUser(user)
+        setError(
+          'Your email is not verified yet. Check your inbox, verify your email, then click the button below.'
+        )
+        return
+      }
+
+      // Get a fresh Firebase ID token
+      const firebaseToken = await getIdToken(user, true)
+
+      // Exchange Firebase identity for a TradeX JWT
       const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/login`,
+        `${import.meta.env.VITE_API_URL}/auth/email`,
         {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({
+            credential: firebaseToken,
+          }),
         }
       )
 
+      const data = await response.json()
+
       if (!response.ok) {
-        const errorData = await response.json()
-        throw new Error(errorData.detail || 'Login failed')
+        throw new Error(data.detail || 'TradeX login failed')
       }
+
+      // Respect Remember Me
+      saveAuthToken(data.access_token)
+
+      if (onLoginSuccess) {
+        onLoginSuccess()
+      }
+    } catch (err) {
+      const messages = {
+        'auth/invalid-credential': 'Incorrect email or password.',
+        'auth/user-not-found': 'No account found with this email.',
+        'auth/wrong-password': 'Incorrect email or password.',
+        'auth/invalid-email': 'Please enter a valid email address.',
+        'auth/user-disabled': 'This account has been disabled.',
+        'auth/too-many-requests': 'Too many attempts. Please try again later.',
+        'auth/network-request-failed': 'Network error. Check your internet connection.',
+      }
+
+      setError(messages[err.code] || err.message || 'Login failed')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResendVerification = async () => {
+    setError('')
+    setLoading(true)
+
+    try {
+      const user = auth.currentUser
+
+      if (!user) {
+        throw new Error(
+          'Your sign-in session has expired. Please sign in again.'
+        )
+      }
+
+      await reload(user)
+
+      if (user.emailVerified) {
+        setVerificationUser(null)
+        setError(
+          'Your email is verified now. Click Continue to TradeX to sign in.'
+        )
+        return
+      }
+
+      await sendEmailVerification(user, {
+        url: window.location.origin,
+        handleCodeInApp: false,
+      })
+
+      setError('A new verification email has been sent. Check your inbox and spam folder.')
+    } catch (err) {
+      setError(err.message || 'Could not resend the verification email.')
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleContinueAfterVerification = async () => {
+    setError('')
+    setLoading(true)
+
+    try {
+      const user = auth.currentUser
+
+      if (!user) {
+        throw new Error('Please sign in again to continue.')
+      }
+
+      await reload(user)
+
+      if (!user.emailVerified) {
+        setError('Your email is still not verified. Please check your inbox.')
+        return
+      }
+
+      const firebaseToken = await getIdToken(user, true)
+
+      const response = await fetch(
+        `${import.meta.env.VITE_API_URL}/auth/email`,
+        {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            credential: firebaseToken,
+          }),
+        }
+      )
 
       const data = await response.json()
 
+      if (!response.ok) {
+        throw new Error(data.detail || 'TradeX login failed')
+      }
+
       saveAuthToken(data.access_token)
 
-      onLoginSuccess()
+      if (onLoginSuccess) {
+        onLoginSuccess()
+      }
     } catch (err) {
-      setError(err.message)
+      setError(err.message || 'Could not complete login.')
     } finally {
       setLoading(false)
     }
@@ -312,6 +446,32 @@ rememberMeRef.current = rememberMe
             {error && (
               <div className="auth-status auth-error">
                 {error}
+              </div>
+            )}
+
+            {verificationUser && (
+              <div className="auth-status auth-success">
+                <button
+                  type="button"
+                  className="auth-button"
+                  onClick={handleContinueAfterVerification}
+                  disabled={loading || googleLoading}
+                >
+                  {loading ? (
+                    <span className="auth-spinner" />
+                  ) : (
+                    "I've verified my email"
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  className="auth-link"
+                  onClick={handleResendVerification}
+                  disabled={loading || googleLoading}
+                >
+                  Resend verification email
+                </button>
               </div>
             )}
 
