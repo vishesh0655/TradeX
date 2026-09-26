@@ -5,11 +5,23 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [rememberMe, setRememberMe] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
 
   const googleButtonRef = useRef(null)
+  const rememberMeRef = useRef(rememberMe)
+rememberMeRef.current = rememberMe
+  const saveAuthToken = (token) => {
+  if (rememberMeRef.current) {
+    localStorage.setItem('token', token)
+    sessionStorage.removeItem('token')
+  } else {
+    sessionStorage.setItem('token', token)
+    localStorage.removeItem('token')
+  }
+}
 
   const handleGoogleResponse = async (response) => {
     setError('')
@@ -35,7 +47,7 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
         throw new Error(data.detail || 'Google login failed')
       }
 
-      localStorage.setItem('token', data.access_token)
+      saveAuthToken(data.access_token)
 
       onLoginSuccess()
     } catch (err) {
@@ -126,7 +138,7 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
 
       const data = await response.json()
 
-      localStorage.setItem('token', data.access_token)
+      saveAuthToken(data.access_token)
 
       onLoginSuccess()
     } catch (err) {
@@ -278,9 +290,13 @@ function Login({ onLoginSuccess, onSwitchToRegister }) {
               </button>
             </div>
 
-            <div className="auth-row-between">
+            <div className="auth-options">
               <label className="remember-box">
-                <input type="checkbox" />
+                <input
+                  type="checkbox"
+                  checked={rememberMe}
+                  onChange={(e) => setRememberMe(e.target.checked)}
+                />
                 <span className="custom-checkbox" />
                 Remember me
               </label>

@@ -6,6 +6,7 @@ function OrderHistory({ refreshTrigger }) {
 
   useEffect(() => {
     const token = localStorage.getItem('token')
+      || sessionStorage.getItem('token')
 
     fetch(`${import.meta.env.VITE_API_URL}/orders`, {
       headers: { Authorization: `Bearer ${token}` },

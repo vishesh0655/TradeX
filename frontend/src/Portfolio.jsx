@@ -5,7 +5,8 @@ function Portfolio({ refreshTrigger }) {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
+    const token = localStorage.getItem('token')||
+      sessionStorage.getItem('token')
 
     fetch(`${import.meta.env.VITE_API_URL}/holdings`, {
       headers: { Authorization: `Bearer ${token}` },
