@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import {
   signInWithEmailAndPassword,
   sendEmailVerification,
+  sendPasswordResetEmail,
   reload,
   getIdToken,
 } from 'firebase/auth'
@@ -16,6 +17,8 @@ function Login({ onLoginSuccess, onSwitchToRegister, onSwitchToPhone }) {
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
   const [verificationUser, setVerificationUser] = useState(null)
+  const [resetLoading, setResetLoading] = useState(false)
+const [resetMessage, setResetMessage] = useState('')
 
   const googleButtonRef = useRef(null)
   const rememberMeRef = useRef(rememberMe)
@@ -328,6 +331,42 @@ rememberMeRef.current = rememberMe
       setLoading(false)
     }
   }
+  const handleForgotPassword = async () => {
+  setError('')
+  setResetMessage('')
+
+  const userEmail = email.trim()
+
+  if (!userEmail) {
+    setError('Please enter your email address first.')
+    return
+  }
+
+  setResetLoading(true)
+
+  try {
+    await sendPasswordResetEmail(auth, userEmail)
+
+    setResetMessage(
+      'If an account exists for this email, a password reset link has been sent. Check your inbox and spam folder.'
+    )
+  } catch (err) {
+    const messages = {
+      'auth/invalid-email': 'Please enter a valid email address.',
+      'auth/too-many-requests':
+        'Too many attempts. Please try again later.',
+      'auth/network-request-failed':
+        'Network error. Check your internet connection.',
+    }
+
+    setError(
+      messages[err.code] ||
+      'Could not send the reset email. Please try again.'
+    )
+  } finally {
+    setResetLoading(false)
+  }
+}
 
   return (
     <div className="auth-page">
@@ -485,11 +524,18 @@ rememberMeRef.current = rememberMe
               <button
                 type="button"
                 className="auth-link"
-                onClick={() => {}}
+                onClick={handleForgotPassword}
+                disabled={loading || googleLoading || resetLoading}
               >
-                Forgot password?
+                {resetLoading ? 'Sending...' : 'Forgot password?'}
               </button>
             </div>
+
+            {resetMessage && (
+              <div className="auth-status auth-success">
+                {resetMessage}
+              </div>
+            )}
 
             {error && (
               <div className="auth-status auth-error">
