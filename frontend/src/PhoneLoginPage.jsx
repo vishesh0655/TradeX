@@ -8,22 +8,17 @@ function PhoneLoginPage({ onPhoneLogin, onBack }) {
   return (
     <div className="auth-page phone-auth-page">
       <div className="auth-card phone-auth-card">
+
         <div className="auth-form-panel phone-auth-panel">
           <div className="auth-form phone-auth-form">
 
-            <h1 className="auth-title">
-              Phone Login
-            </h1>
-
-            <p className="auth-subtitle">
-              Sign in to TradeX using your mobile number
-            </p>
-
+            {/* OTP V3 UI */}
             <PhoneLogin
               onPhoneLogin={onPhoneLogin}
               rememberMe={rememberMe}
             />
 
+            {/* REMEMBER ME */}
             <div className="phone-auth-options">
               <label className="remember-box">
                 <input
@@ -33,11 +28,14 @@ function PhoneLoginPage({ onPhoneLogin, onBack }) {
                     setRememberMe(e.target.checked)
                   }
                 />
+
                 <span className="custom-checkbox" />
+
                 Remember me
               </label>
             </div>
 
+            {/* BACK TO LOGIN */}
             <button
               type="button"
               className="auth-link phone-auth-back"
@@ -48,6 +46,7 @@ function PhoneLoginPage({ onPhoneLogin, onBack }) {
 
           </div>
         </div>
+
       </div>
     </div>
   )

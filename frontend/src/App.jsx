@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
-import Login from './Login'
-import Register from './Register'
-import PhoneLoginPage from './PhoneLoginPage'
-import Portfolio from './Portfolio'
+import Login from './login'
+import Register from './register'
+import PhoneLoginPage from './phoneLoginPage'
+import Portfolio from './portfolio'
 import OrderHistory from './OrderHistory'
-import Trade from './Trade'
+import Trade from './trade'
 
 function App() {
   const [stocks, setStocks] = useState([])

@@ -5,8 +5,9 @@ function OrderHistory({ refreshTrigger }) {
   const [error, setError] = useState('')
 
   useEffect(() => {
-    const token = localStorage.getItem('token')
-      || sessionStorage.getItem('token')
+    const token =
+      localStorage.getItem('token') ||
+      sessionStorage.getItem('token')
 
     fetch(`${import.meta.env.VITE_API_URL}/orders`, {
       headers: { Authorization: `Bearer ${token}` },
@@ -30,10 +31,12 @@ function OrderHistory({ refreshTrigger }) {
         <table border="1" cellPadding="8">
           <thead>
             <tr>
+              <th>Side</th>
               <th>Type</th>
               <th>Symbol</th>
               <th>Qty</th>
-              <th>Price/Share</th>
+              <th>Filled</th>
+              <th>Avg Fill Price</th>
               <th>Total</th>
               <th>Status</th>
             </tr>
@@ -41,13 +44,21 @@ function OrderHistory({ refreshTrigger }) {
           <tbody>
             {orders.map((order) => (
               <tr key={order.id}>
-                <td style={{ color: order.order_type === 'BUY' ? '#4ade80' : '#f87171' }}>
-                  {order.order_type}
+                <td style={{ color: order.side === 'BUY' ? '#4ade80' : '#f87171' }}>
+                  {order.side}
                 </td>
+                <td>{order.order_type}</td>
                 <td>{order.stock_symbol}</td>
                 <td>{order.quantity}</td>
-                <td>₹{order.price_per_share}</td>
-                <td>₹{order.total_amount}</td>
+                <td>{order.filled_quantity}</td>
+                <td>
+                  {order.average_fill_price == null
+                    ? '—'
+                    : `₹${order.average_fill_price}`}
+                </td>
+                <td>
+                  {order.total_amount == null ? '—' : `₹${order.total_amount}`}
+                </td>
                 <td>{order.status}</td>
               </tr>
             ))}
