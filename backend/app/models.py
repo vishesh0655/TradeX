@@ -449,6 +449,24 @@ class OrderEvent(Base):
     order = relationship("Order", back_populates="events")
 
 
+class WatchlistItem(Base):
+    __tablename__ = "watchlist_items"
+
+    id = Column(BigInteger, primary_key=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    stock_id = Column(BigInteger, ForeignKey("stocks.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(
+        TIMESTAMP(timezone=True),
+        nullable=False,
+        server_default=text("CURRENT_TIMESTAMP"),
+    )
+    __table_args__ = (
+        UniqueConstraint("user_id", "stock_id", name="watchlist_items_user_stock_key"),
+    )
+    user = relationship("User")
+    stock = relationship("Stock")
+
+
 class Execution(Base):
     __tablename__ = "executions"
 

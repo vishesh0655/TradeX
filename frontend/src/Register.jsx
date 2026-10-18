@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   createUserWithEmailAndPassword,
   sendEmailVerification,
@@ -7,6 +7,7 @@ import {
   getIdToken,
 } from 'firebase/auth'
 import { auth } from './firebase'
+import { signInWithGoogle, signInWithVerifiedEmail } from './api/auth'
 import './Auth.css'
 
 function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
@@ -14,7 +15,6 @@ function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
-  const [success, setSuccess] = useState(false)
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [googleLoading, setGoogleLoading] = useState(false)
@@ -22,30 +22,12 @@ function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
 
   const googleButtonRef = useRef(null)
 
-  const handleGoogleResponse = async (response) => {
+  const handleGoogleResponse = useCallback(async (response) => {
     setError('')
-    setSuccess(false)
     setGoogleLoading(true)
 
     try {
-      const result = await fetch(
-        `${import.meta.env.VITE_API_URL}/auth/google`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            credential: response.credential,
-          }),
-        }
-      )
-
-      const data = await result.json()
-
-      if (!result.ok) {
-        throw new Error(data.detail || 'Google signup failed')
-      }
+      const data = await signInWithGoogle(response.credential)
 
       localStorage.setItem('token', data.access_token)
 
@@ -57,22 +39,23 @@ function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
     } finally {
       setGoogleLoading(false)
     }
-  }
+  }, [onRegisterSuccess])
 
   useEffect(() => {
     const initializeGoogle = () => {
-      if (!window.google || !googleButtonRef.current) {
+      const googleIdentity = window.google
+      if (!googleIdentity || !googleButtonRef.current) {
         return
       }
 
-      google.accounts.id.initialize({
+      googleIdentity.accounts.id.initialize({
         client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
         callback: handleGoogleResponse,
       })
 
       googleButtonRef.current.innerHTML = ''
 
-      google.accounts.id.renderButton(
+      googleIdentity.accounts.id.renderButton(
         googleButtonRef.current,
         {
           theme: 'outline',
@@ -114,13 +97,12 @@ function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
     return () => {
       script.onload = null
     }
-  }, [])
+  }, [handleGoogleResponse])
 
   const handleSubmit = async (e) => {
   e.preventDefault()
 
   setError('')
-  setSuccess(false)
   setLoading(true)
 
   try {
@@ -140,7 +122,6 @@ function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
     })
 
     setVerificationSent(true)
-    setSuccess(true)
     setPassword('')
   } catch (err) {
     const messages = {
@@ -183,26 +164,7 @@ function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
       const firebaseToken = await getIdToken(user, true)
 
       // Send verified identity to TradeX backend
-      const result = await fetch(
-        `${import.meta.env.VITE_API_URL}/auth/email`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            credential: firebaseToken,
-          }),
-        }
-      )
-
-      const data = await result.json()
-
-      if (!result.ok) {
-        throw new Error(
-          data.detail || 'Failed to create your TradeX account.'
-        )
-      }
+      const data = await signInWithVerifiedEmail(firebaseToken)
 
       // Save TradeX JWT
       localStorage.setItem('token', data.access_token)

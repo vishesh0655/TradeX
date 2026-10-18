@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   signInWithEmailAndPassword,
   sendEmailVerification,
@@ -7,6 +7,7 @@ import {
   getIdToken,
 } from 'firebase/auth'
 import { auth } from './firebase'
+import { signInWithGoogle, signInWithVerifiedEmail, signInLegacy } from './api/auth'
 import './Auth.css'
 function Login({ onLoginSuccess, onSwitchToRegister, onSwitchToPhone }) {
   const [email, setEmail] = useState('')
@@ -22,7 +23,9 @@ const [resetMessage, setResetMessage] = useState('')
 
   const googleButtonRef = useRef(null)
   const rememberMeRef = useRef(rememberMe)
-rememberMeRef.current = rememberMe
+  useEffect(() => {
+    rememberMeRef.current = rememberMe
+  }, [rememberMe])
   const saveAuthToken = (token) => {
   if (rememberMeRef.current) {
     localStorage.setItem('token', token)
@@ -33,29 +36,12 @@ rememberMeRef.current = rememberMe
   }
 }
 
-  const handleGoogleResponse = async (response) => {
+  const handleGoogleResponse = useCallback(async (response) => {
     setError('')
     setGoogleLoading(true)
 
     try {
-      const result = await fetch(
-        `${import.meta.env.VITE_API_URL}/auth/google`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            credential: response.credential,
-          }),
-        }
-      )
-
-      const data = await result.json()
-
-      if (!result.ok) {
-        throw new Error(data.detail || 'Google login failed')
-      }
+      const data = await signInWithGoogle(response.credential)
 
       saveAuthToken(data.access_token)
 
@@ -65,22 +51,23 @@ rememberMeRef.current = rememberMe
     } finally {
       setGoogleLoading(false)
     }
-  }
+  }, [onLoginSuccess])
 
   useEffect(() => {
     const initializeGoogle = () => {
-      if (!window.google || !googleButtonRef.current) {
+      const googleIdentity = window.google
+      if (!googleIdentity || !googleButtonRef.current) {
         return
       }
 
-      google.accounts.id.initialize({
+      googleIdentity.accounts.id.initialize({
         client_id: import.meta.env.VITE_GOOGLE_CLIENT_ID,
         callback: handleGoogleResponse,
       })
 
       googleButtonRef.current.innerHTML = ''
 
-      google.accounts.id.renderButton(
+      googleIdentity.accounts.id.renderButton(
         googleButtonRef.current,
         {
           theme: 'outline',
@@ -122,7 +109,7 @@ rememberMeRef.current = rememberMe
     return () => {
       script.onload = null
     }
-  }, [])
+  }, [handleGoogleResponse])
 
   const handleSubmit = async (e) => {
     e.preventDefault()
@@ -155,24 +142,7 @@ rememberMeRef.current = rememberMe
       const firebaseToken = await getIdToken(user, true)
 
       // Exchange Firebase identity for a TradeX JWT
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/auth/email`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            credential: firebaseToken,
-          }),
-        }
-      )
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.detail || 'TradeX login failed')
-      }
+      const data = await signInWithVerifiedEmail(firebaseToken)
 
       // Respect Remember Me
       saveAuthToken(data.access_token)
@@ -191,36 +161,10 @@ rememberMeRef.current = rememberMe
 
       if (shouldTryLegacyLogin) {
         try {
-          const legacyResponse = await fetch(
-            `${import.meta.env.VITE_API_URL}/login`,
-            {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({
-                email: email.trim(),
-                password,
-              }),
-            }
-          )
-
-          const legacyData = await legacyResponse.json()
-
-          if (legacyResponse.ok) {
-            saveAuthToken(legacyData.access_token)
-
-            if (onLoginSuccess) {
-              onLoginSuccess()
-            }
-            return
-          }
-
-          // Prefer the legacy API's error when it also rejects the credentials.
-          setError(
-            legacyData.detail ||
-              'Incorrect email or password. If this is a newer account, use your Firebase password.'
-          )
+          const legacyData = await signInLegacy(email.trim(), password)
+          saveAuthToken(legacyData.access_token)
+          if (onLoginSuccess) onLoginSuccess()
+          return
         } catch (legacyErr) {
           setError(
             legacyErr.message ||
@@ -301,24 +245,7 @@ rememberMeRef.current = rememberMe
 
       const firebaseToken = await getIdToken(user, true)
 
-      const response = await fetch(
-        `${import.meta.env.VITE_API_URL}/auth/email`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            credential: firebaseToken,
-          }),
-        }
-      )
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.detail || 'TradeX login failed')
-      }
+      const data = await signInWithVerifiedEmail(firebaseToken)
 
       saveAuthToken(data.access_token)
 

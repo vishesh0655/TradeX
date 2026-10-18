@@ -1,21 +1,12 @@
 import { useEffect, useState } from 'react'
+import { getOrders } from './api/orders'
 
 function OrderHistory({ refreshTrigger }) {
   const [orders, setOrders] = useState([])
   const [error, setError] = useState('')
 
   useEffect(() => {
-    const token =
-      localStorage.getItem('token') ||
-      sessionStorage.getItem('token')
-
-    fetch(`${import.meta.env.VITE_API_URL}/orders`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error('Failed to load order history')
-        return response.json()
-      })
+    getOrders()
       .then((data) => setOrders(data))
       .catch((err) => setError(err.message))
   }, [refreshTrigger])

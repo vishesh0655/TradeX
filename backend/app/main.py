@@ -75,6 +75,120 @@ def list_stocks():
         ]
 
     return {"stocks": stocks}
+
+
+@app.get("/stocks/{symbol}/quote")
+def get_stock_quote(symbol: str, db: Session = Depends(get_db)):
+    stock = (
+        db.query(models.Stock)
+        .filter(models.Stock.symbol == symbol.strip().upper(), models.Stock.is_active.is_(True))
+        .first()
+    )
+    if stock is None:
+        raise HTTPException(status_code=404, detail="Stock not found")
+    return {
+        "symbol": stock.symbol,
+        "company_name": stock.company_name,
+        "price": stock.current_price,
+        "updated_at": stock.updated_at,
+        "data_mode": "SIMULATED",
+    }
+
+
+@app.get("/wallet", response_model=schemas.WalletOut)
+def get_wallet(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    wallet = db.query(models.Wallet).filter(models.Wallet.user_id == current_user.id).first()
+    if wallet is None:
+        raise HTTPException(status_code=404, detail="Virtual wallet not found")
+    return schemas.WalletOut(balance=wallet.balance, currency=wallet.currency)
+
+
+@app.get("/wallet/transactions", response_model=list[schemas.WalletTransactionOut])
+def get_wallet_transactions(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    wallet = db.query(models.Wallet).filter(models.Wallet.user_id == current_user.id).first()
+    if wallet is None:
+        raise HTTPException(status_code=404, detail="Virtual wallet not found")
+    return (
+        db.query(models.WalletTransaction)
+        .filter(models.WalletTransaction.wallet_id == wallet.id)
+        .order_by(models.WalletTransaction.created_at.desc(), models.WalletTransaction.id.desc())
+        .all()
+    )
+
+
+@app.get("/watchlist", response_model=list[schemas.WatchlistOut])
+def get_watchlist(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    rows = (
+        db.query(models.WatchlistItem, models.Stock)
+        .join(models.Stock, models.Stock.id == models.WatchlistItem.stock_id)
+        .filter(models.WatchlistItem.user_id == current_user.id)
+        .order_by(models.WatchlistItem.created_at.desc())
+        .all()
+    )
+    return [
+        schemas.WatchlistOut(
+            symbol=stock.symbol,
+            company_name=stock.company_name,
+            current_price=stock.current_price,
+            created_at=item.created_at,
+        )
+        for item, stock in rows
+    ]
+
+
+@app.post("/watchlist", response_model=schemas.WatchlistOut, status_code=status.HTTP_201_CREATED)
+def add_watchlist_item(
+    payload: schemas.WatchlistCreate,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    symbol = payload.symbol.strip().upper()
+    stock = db.query(models.Stock).filter(models.Stock.symbol == symbol, models.Stock.is_active.is_(True)).first()
+    if stock is None:
+        raise HTTPException(status_code=404, detail="Stock not found")
+    item = (
+        db.query(models.WatchlistItem)
+        .filter(models.WatchlistItem.user_id == current_user.id, models.WatchlistItem.stock_id == stock.id)
+        .first()
+    )
+    if item is None:
+        item = models.WatchlistItem(user_id=current_user.id, stock_id=stock.id)
+        db.add(item)
+        db.commit()
+        db.refresh(item)
+    return schemas.WatchlistOut(
+        symbol=stock.symbol,
+        company_name=stock.company_name,
+        current_price=stock.current_price,
+        created_at=item.created_at,
+    )
+
+
+@app.delete("/watchlist/{symbol}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_watchlist_item(
+    symbol: str,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    item = (
+        db.query(models.WatchlistItem)
+        .join(models.Stock, models.Stock.id == models.WatchlistItem.stock_id)
+        .filter(models.WatchlistItem.user_id == current_user.id, models.Stock.symbol == symbol.strip().upper())
+        .first()
+    )
+    if item is None:
+        raise HTTPException(status_code=404, detail="Watchlist item not found")
+    db.delete(item)
+    db.commit()
 @app.post("/register", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED)
 def register_user(payload: schemas.UserCreate, db: Session = Depends(get_db)):
     existing_user = db.query(models.User).filter(models.User.email == payload.email).first()
@@ -586,6 +700,10 @@ def place_order(
         ),
         status=order.status,
         client_order_id=order.client_order_id,
+        limit_price=order.limit_price,
+        stop_price=order.stop_price,
+        created_at=order.created_at,
+        updated_at=order.updated_at,
     )
 
 # Temporary compatibility routes for the existing frontend/API clients.
@@ -656,6 +774,10 @@ def _order_to_schema(order: models.Order) -> schemas.OrderOut:
         total_amount=total,
         status=order.status,
         client_order_id=order.client_order_id,
+        limit_price=order.limit_price,
+        stop_price=order.stop_price,
+        created_at=order.created_at,
+        updated_at=order.updated_at,
     )
 
 

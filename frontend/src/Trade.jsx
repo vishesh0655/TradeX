@@ -1,4 +1,6 @@
 import { useState } from 'react'
+import { placeOrder as submitPaperOrder } from './api/orders'
+import { getToken } from './api/client'
 
 function Trade({ onTradeComplete }) {
   const [symbol, setSymbol] = useState('')
@@ -11,9 +13,7 @@ function Trade({ onTradeComplete }) {
     setMessage('')
     setIsError(false)
 
-    const token =
-      localStorage.getItem('token') ||
-      sessionStorage.getItem('token')
+    const token = getToken()
 
     if (!token) {
       setMessage('Please log in again to place an order.')
@@ -39,25 +39,12 @@ function Trade({ onTradeComplete }) {
     setIsSubmitting(true)
 
     try {
-      const response = await fetch(`${import.meta.env.VITE_API_URL}/orders`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          stock_symbol: cleanSymbol,
-          side,
-          order_type: 'MARKET',
-          quantity: cleanQuantity,
-        }),
+      const data = await submitPaperOrder({
+        stock_symbol: cleanSymbol,
+        side,
+        order_type: 'MARKET',
+        quantity: cleanQuantity,
       })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.detail || 'Order failed')
-      }
 
       setMessage(
         `${side === 'BUY' ? 'Bought' : 'Sold'} ${data.filled_quantity} ${cleanSymbol} @ ₹${data.average_fill_price}`

@@ -1,20 +1,12 @@
 import { useEffect, useState } from 'react'
+import { getHoldings } from './api/portfolio'
 
 function Portfolio({ refreshTrigger }) {
   const [holdings, setHoldings] = useState([])
   const [error, setError] = useState('')
 
   useEffect(() => {
-    const token = localStorage.getItem('token')||
-      sessionStorage.getItem('token')
-
-    fetch(`${import.meta.env.VITE_API_URL}/holdings`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error('Failed to load holdings')
-        return response.json()
-      })
+    getHoldings()
       .then((data) => setHoldings(data))
       .catch((err) => setError(err.message))
   }, [refreshTrigger])

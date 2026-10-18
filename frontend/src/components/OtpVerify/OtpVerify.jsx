@@ -12,7 +12,6 @@ function OtpVerify({
   const [phase, setPhase] = useState('idle')
   const [drawSlot, setDrawSlot] = useState(null)
   const [countdown, setCountdown] = useState(30)
-  const [error, setError] = useState(false)
 
   const inputsRef = useRef([])
   const timersRef = useRef([])
@@ -34,20 +33,6 @@ function OtpVerify({
     requestAnimationFrame(() => {
       setDrawSlot(index)
     })
-  }
-
-  const triggerError = () => {
-    setError(true)
-    setPhase('error')
-
-    const timer = setTimeout(() => {
-      setOtp(['', '', '', '', '', ''])
-      setError(false)
-      setPhase('idle')
-      focusInput(0)
-    }, 650)
-
-    timersRef.current.push(timer)
   }
 
   const startSuccessAnimation = () => {
@@ -356,7 +341,6 @@ function OtpVerify({
   const pageClass = [
     'otp-card',
     `otp-phase-${phase}`,
-    error ? 'otp-has-error' : '',
   ]
     .filter(Boolean)
     .join(' ')

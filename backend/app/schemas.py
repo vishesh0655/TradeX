@@ -78,6 +78,10 @@ class OrderOut(BaseModel):
     total_amount: float | None
     status: str
     client_order_id: str | None = None
+    limit_price: Decimal | None = None
+    stop_price: Decimal | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
 
 
 class ExecutionOut(BaseModel):
@@ -92,6 +96,33 @@ class OrderEventOut(BaseModel):
     id: int
     event_type: str
     metadata_json: dict
+    created_at: datetime
+    model_config = ConfigDict(from_attributes=True)
+
+
+class WatchlistCreate(BaseModel):
+    symbol: str = Field(min_length=1, max_length=20)
+
+
+class WatchlistOut(BaseModel):
+    symbol: str
+    company_name: str
+    current_price: Decimal
+    created_at: datetime
+
+
+class WalletOut(BaseModel):
+    balance: Decimal
+    currency: str
+    account_type: str = "PAPER"
+
+
+class WalletTransactionOut(BaseModel):
+    id: int
+    transaction_type: str
+    amount: Decimal
+    balance_after: Decimal
+    reference_id: int | None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 

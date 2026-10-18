@@ -1,0 +1,6 @@
+import { PaperBadge } from '../components/common/ui'
+import { formatCurrency } from '../utils/format'
+
+export default function ProfilePage({ user, walletBalance, onLogout }) {
+  return <div className="page-stack"><div className="page-title-row"><div><span className="eyebrow">ACCOUNT SETTINGS</span><h1>Profile</h1><p>Your TradeX identity and paper account details.</p></div></div><section className="content-card profile-card"><div className="profile-hero"><span className="avatar avatar-large">{(user?.name || 'T').charAt(0).toUpperCase()}</span><div><h2>{user?.name || 'TradeX trader'}</h2><span>{user?.email || '—'}</span></div></div><div className="profile-info"><div><span>Account type</span><strong>Educational paper trading</strong></div><div><span>Authentication</span><strong>TradeX session</strong></div><div><span>Virtual cash</span><strong>{formatCurrency(walletBalance)}</strong></div><div><span>Real money access</span><strong className="positive">None</strong></div></div><div className="profile-paper"><PaperBadge/><p>Market prices and order execution in this application are simulated. No broker, exchange, bank, or Demat account is connected.</p></div><button className="secondary-button profile-logout" onClick={onLogout}>Log out of TradeX</button></section></div>
+}
