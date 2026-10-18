@@ -96,6 +96,24 @@ class FeeEstimateOut(BaseModel):
     net_cash_effect: Decimal
 
 
+class PaperPriceUpdateRequest(BaseModel):
+    """Explicit paper quote supplied by a trusted internal price source."""
+
+    price: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+
+
+class PaperPriceUpdateOut(BaseModel):
+    symbol: str
+    previous_price: Decimal
+    price: Decimal
+    updated_at: datetime
+    orders_evaluated: int
+    stop_orders_triggered: int
+    orders_filled: int
+    orders_partially_filled: int
+    orders_rejected: int
+
+
 class LegacyOrderCreate(BaseModel):
     stock_symbol: str = Field(min_length=1, max_length=20)
     quantity: int = Field(gt=0)

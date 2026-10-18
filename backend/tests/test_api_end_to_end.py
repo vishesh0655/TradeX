@@ -9,6 +9,7 @@ from decimal import Decimal, ROUND_HALF_UP
 import os
 import unittest
 from uuid import uuid4
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
@@ -338,6 +339,31 @@ class PaperTradingApiJourneyTests(unittest.TestCase):
             db.query(models.User).filter_by(id=user["id"]).update({"is_active": False})
             db.commit()
         self.assertEqual(self.client.get("/wallet", headers=headers).status_code, 403)
+
+    def test_trusted_paper_price_update_fills_open_limit_order(self):
+        _, owner = self.register("price-update")
+        order = self.place(
+            owner, order_type="LIMIT", quantity=2, limit_price=95
+        ).json()
+        self.assertEqual(order["status"], "OPEN")
+        self.assertEqual(self.get_reservation(order["id"]).state, "ACTIVE")
+
+        with patch.dict(os.environ, {"TRADEX_PAPER_PRICE_UPDATE_TOKEN": "test-token"}):
+            response = self.client.post(
+                f"/internal/paper-prices/{self.symbol}",
+                headers={"X-TradeX-Price-Token": "test-token"},
+                json={"price": "95.00"},
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["orders_filled"], 1)
+        self.assertEqual(
+            self.client.get(f"/orders/{order['id']}", headers=owner).json()["status"],
+            "FILLED",
+        )
+        self.assertEqual(self.get_reservation(order["id"]).state, "SETTLED")
+        quote = self.client.get(f"/stocks/{self.symbol}/quote").json()
+        self.assertEqual(Decimal(str(quote["price"])), Decimal("95.00"))
 
     def test_simultaneous_buy_and_sell_requests_cannot_overreserve(self):
         buyer, buyer_headers = self.register("concurrent-buyer")

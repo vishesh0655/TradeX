@@ -16,6 +16,8 @@ educational purposes only.
 - No real-money deposits or withdrawals, payment rails, bank/UPI, Demat, KYC,
   broker integration, or exchange order submission.
 - No external market-data feed and no price-generation algorithm in Phase 1.
+- Explicit paper-price updates are accepted only from a trusted internal caller
+  using a server-side token; the endpoint is disabled until configured.
 
 ## Architecture
 
@@ -172,6 +174,10 @@ running. Main endpoint groups include:
 - Authentication: `/register`, `/login`, `/auth/email`, `/auth/google`,
   `/auth/phone`, `/me`.
 - Paper market: `GET /stocks`, `GET /stocks/{symbol}/quote`.
+- Trusted paper quote update: `POST /internal/paper-prices/{symbol}`. Set
+  `TRADEX_PAPER_PRICE_UPDATE_TOKEN` only on the backend and trusted price
+  publisher. Each supplied price is stored and open orders are evaluated in
+  the same database transaction. Never expose this token in the React app.
 - Orders: `POST /orders`, `GET /orders`, `GET /orders/{id}`,
   `PATCH /orders/{id}`, `POST /orders/{id}/cancel`, and nested executions and
   events. `POST /orders/buy` and `POST /orders/sell` remain as MARKET-only
@@ -181,6 +187,23 @@ running. Main endpoint groups include:
 
 All protected account endpoints require a TradeX JWT. Responses describe
 simulated paper activity only.
+
+The trusted paper-price update endpoint uses the `X-TradeX-Price-Token` header
+and is unavailable when `TRADEX_PAPER_PRICE_UPDATE_TOKEN` is unset. Example
+PowerShell request (replace the price with a value supplied by your authorized
+paper-price source):
+
+```powershell
+$headers = @{ "X-TradeX-Price-Token" = $env:TRADEX_PAPER_PRICE_UPDATE_TOKEN }
+Invoke-RestMethod -Method Post `
+  -Uri "http://localhost:8000/internal/paper-prices/TCS" `
+  -Headers $headers `
+  -ContentType "application/json" `
+  -Body '{"price":"95.00"}'
+```
+
+The endpoint does not generate prices. Do not put the token in frontend code or
+browser storage.
 
 ## Local setup
 

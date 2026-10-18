@@ -66,8 +66,20 @@ class OrderService:
             raise OrderServiceError("Stock symbol is required")
 
         try:
-            # Serialize all risk decisions for this account before reading
-            # purchasing power; never lock a shared Stock row globally.
+            # Take the instrument lock before the wallet lock. Trusted price
+            # updates use the same order so a new order cannot slip past a
+            # price evaluation already in progress.
+            stock = (
+                db.query(models.Stock)
+                .filter(models.Stock.symbol == symbol)
+                .with_for_update()
+                .first()
+            )
+            if not stock:
+                raise OrderServiceError("Stock not found", 404)
+            if not stock.is_active:
+                raise OrderServiceError("Instrument is not tradable", 409)
+
             wallet = (
                 db.query(models.Wallet)
                 .filter(
@@ -82,14 +94,6 @@ class OrderService:
                 RiskEngine.validate_account(user, wallet)
             except RiskRejected as exc:
                 raise OrderServiceError(str(exc), 403 if user is None or not user.is_active else 404) from exc
-
-            stock = (
-                db.query(models.Stock)
-                .filter(models.Stock.symbol == symbol)
-                .first()
-            )
-            if not stock:
-                raise OrderServiceError("Stock not found", 404)
 
             # -----------------------------
             # Idempotency
@@ -114,8 +118,6 @@ class OrderService:
                 existing_order.idempotency_replay = True
                 return existing_order
 
-            if not stock.is_active:
-                raise OrderServiceError("Instrument is not tradable", 409)
             # Use the stored paper quote for both immediate MARKET settlement
             # and first eligibility evaluation of newly accepted resting orders.
             quote = self.price_provider.get_quote(stock)

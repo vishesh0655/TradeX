@@ -49,9 +49,9 @@ class OrderServiceTests(unittest.TestCase):
     def test_valid_stop_limit_order_is_created_open(self):
         wallet = make_wallet()
         self.db.query.side_effect = [
+            FakeQuery(make_stock()),
             FakeQuery(wallet),
             FakeQuery(make_user()),
-            FakeQuery(make_stock()),
             FakeQuery(None),
             FakeQuery(None),
         ]
@@ -85,9 +85,9 @@ class OrderServiceTests(unittest.TestCase):
 
     def test_market_buy_keeps_existing_atomic_paper_fill_path(self):
         self.db.query.side_effect = [
+            FakeQuery(make_stock()),
             FakeQuery(make_wallet()),
             FakeQuery(make_user()),
-            FakeQuery(make_stock()),
             FakeQuery(None),
             FakeQuery(None),
             FakeQuery(None),
@@ -126,7 +126,7 @@ class OrderServiceTests(unittest.TestCase):
             stop_price=None,
         )
         self.db.query.side_effect = [
-            FakeQuery(make_wallet()), FakeQuery(make_user()), FakeQuery(make_stock()),
+            FakeQuery(make_stock()), FakeQuery(make_wallet()), FakeQuery(make_user()),
             FakeQuery(existing),
         ]
 
@@ -156,7 +156,7 @@ class OrderServiceTests(unittest.TestCase):
             stop_price=None,
         )
         self.db.query.side_effect = [
-            FakeQuery(make_wallet()), FakeQuery(make_user()), FakeQuery(make_stock()),
+            FakeQuery(make_stock()), FakeQuery(make_wallet()), FakeQuery(make_user()),
             FakeQuery(existing),
         ]
 
@@ -192,7 +192,7 @@ class OrderServiceTests(unittest.TestCase):
             id=8, user_id=3, balance=Decimal("100.00"), reserved_cash=Decimal("0.00")
         )
         self.db.query.side_effect = [
-            FakeQuery(wallet), FakeQuery(make_user()), FakeQuery(make_stock()),
+            FakeQuery(make_stock()), FakeQuery(wallet), FakeQuery(make_user()),
             FakeQuery(None), FakeQuery(None),
         ]
         with self.assertRaises(OrderServiceError) as context:

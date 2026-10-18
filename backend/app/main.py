@@ -1,11 +1,12 @@
 import os
 import logging
+import hmac
 from datetime import datetime
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 from google.oauth2 import id_token
 from google.auth.transport import requests
-from fastapi import Depends, HTTPException, Query, Request, Response, status
+from fastapi import Depends, Header, HTTPException, Query, Request, Response, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -23,6 +24,10 @@ from app.services.portfolio_valuation import portfolio_valuation_service
 from app.services.trading_queries import trading_query_service, TradingQueryError
 from app.services.fee_engine import fee_engine
 from app.services.market_data import market_price_provider
+from app.services.paper_price_update import (
+    PaperPriceUpdateError,
+    paper_price_update_service,
+)
 from fastapi import FastAPI
 from sqlalchemy import text
 
@@ -149,6 +154,57 @@ def get_stock_quote(symbol: str, db: Session = Depends(get_db)):
         "updated_at": quote.observed_at,
         "data_mode": "SIMULATED",
     }
+
+
+def require_paper_price_update_token(
+    token: str | None = Header(default=None, alias="X-TradeX-Price-Token"),
+) -> None:
+    configured_token = os.getenv("TRADEX_PAPER_PRICE_UPDATE_TOKEN", "").strip()
+    if not configured_token:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Trusted paper price updates are not configured",
+        )
+    supplied_token = token or ""
+    if not hmac.compare_digest(
+        supplied_token.encode("utf-8"), configured_token.encode("utf-8")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid paper price update token",
+        )
+
+
+@app.post(
+    "/internal/paper-prices/{symbol}",
+    response_model=schemas.PaperPriceUpdateOut,
+    tags=["Internal paper market"],
+    summary="Update a stored paper quote and evaluate open orders",
+    description=(
+        "Accepts an explicitly supplied paper price from a trusted internal "
+        "source, stores it, and evaluates open paper orders transactionally. "
+        "This endpoint does not generate prices or access external market data."
+    ),
+    responses={
+        401: {"description": "The internal price update token is invalid"},
+        404: {"description": "Instrument not found"},
+        409: {"description": "Instrument is not tradable"},
+        422: {"description": "Invalid price"},
+        503: {"description": "Trusted price updates are not configured"},
+    },
+)
+def update_paper_price(
+    symbol: str,
+    payload: schemas.PaperPriceUpdateRequest,
+    db: Session = Depends(get_db),
+    _authorized: None = Depends(require_paper_price_update_token),
+):
+    try:
+        return paper_price_update_service.update_price(
+            db, symbol=symbol, price=payload.price
+        )
+    except PaperPriceUpdateError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
 
 
 @app.get("/wallet", response_model=schemas.WalletOut, tags=["Paper account"], description="Read the authenticated user's virtual wallet. No real-money balance is supported.", responses=PAPER_AUTH_RESPONSES)
