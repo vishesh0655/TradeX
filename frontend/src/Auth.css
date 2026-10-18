@@ -555,6 +555,9 @@
     );
 
   color: var(--auth-text);
+  -webkit-text-fill-color: var(--auth-text);
+  caret-color: var(--auth-accent);
+  opacity: 1;
 
   font-family: inherit;
 
@@ -574,6 +577,18 @@
 
 .auth-input-group input::placeholder {
   color: transparent;
+}
+
+.auth-input-group input:-webkit-autofill,
+.auth-input-group input:-webkit-autofill:hover,
+.auth-input-group input:-webkit-autofill:focus,
+.auth-input-group input:-webkit-autofill:active,
+.auth-input-group input:autofill {
+  -webkit-text-fill-color: var(--auth-text) !important;
+  caret-color: var(--auth-text);
+  -webkit-box-shadow: 0 0 0 1000px #101827 inset !important;
+  box-shadow: 0 0 0 1000px #101827 inset !important;
+  transition: background-color 99999s ease-out 0s;
 }
 
 .auth-input-group input:hover {
@@ -1336,7 +1351,7 @@
     rgba(255,255,255,0.72);
 }
 
-.live-pill {
+.preview-pill {
   display: inline-flex;
 
   align-items: center;
@@ -1358,17 +1373,11 @@
     rgba(255,255,255,0.65);
 }
 
-.live-pill i {
-  width: 5px;
-  height: 5px;
-
-  border-radius: 50%;
-
-  background:
-    #6dffbf;
-
-  box-shadow:
-    0 0 8px #6dffbf;
+.auth-preview-copy {
+  padding: 12px 0;
+  color: rgba(255,255,255,0.72);
+  font-size: 13px;
+  line-height: 1.7;
 }
 
 .spark-chart {
@@ -3943,5 +3952,118 @@
   100% {
     transform: scale(1) rotate(0);
     opacity: 1;
+  }
+}
+
+/* Login and signup share one clipped stage so their panels can slide past
+   one another without replacing the authentication screen. */
+.auth-transition-stage {
+  position: relative;
+  width: 100%;
+  min-height: 100dvh;
+  overflow: hidden;
+  isolation: isolate;
+  background:
+    radial-gradient(circle at 12% 12%, rgba(25, 199, 165, 0.10), transparent 28%),
+    radial-gradient(circle at 88% 85%, rgba(79, 124, 255, 0.12), transparent 32%),
+    radial-gradient(circle at 50% -10%, rgba(79, 124, 255, 0.08), transparent 38%),
+    linear-gradient(145deg, #050810 0%, #080d17 48%, #0b1220 100%);
+}
+
+.auth-transition-stage > .auth-screen {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: transparent;
+}
+
+.auth-transition-stage > .auth-screen::before,
+.auth-transition-stage > .auth-screen::after,
+.auth-transition-stage .auth-scene {
+  display: none;
+}
+
+.auth-transition-stage[data-mode="login"] > .auth-screen-login,
+.auth-transition-stage[data-mode="register"] > .auth-screen-register {
+  z-index: 2;
+  pointer-events: auto;
+}
+
+.auth-transition-stage .auth-screen .auth-card {
+  animation: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.auth-transition-stage .auth-screen .auth-overlay::after {
+  animation: none;
+}
+
+.auth-transition-stage .auth-screen .auth-form-panel,
+.auth-transition-stage .auth-screen .auth-overlay {
+  transition: transform 460ms cubic-bezier(.22, .75, .25, 1);
+}
+
+/* Signup starts with its form off to the right and its promo panel off to the
+   left. Only compositor-friendly transforms run during the swap. */
+.auth-transition-stage .auth-screen-register .auth-form-panel {
+  transform: translate3d(105vw, 0, 0);
+}
+
+.auth-transition-stage .auth-screen-register .auth-overlay {
+  transform: translate3d(-105vw, 0, 0);
+}
+
+.auth-transition-stage[data-mode="register"] .auth-screen-login .auth-form-panel {
+  transform: translate3d(-105vw, 0, 0);
+}
+
+.auth-transition-stage[data-mode="register"] .auth-screen-login .auth-overlay {
+  transform: translate3d(105vw, 0, 0);
+}
+
+.auth-transition-stage[data-mode="register"] .auth-screen-register .auth-form-panel,
+.auth-transition-stage[data-mode="register"] .auth-screen-register .auth-overlay {
+  transform: translate3d(0, 0, 0);
+}
+
+@media (max-width: 760px) {
+  .auth-transition-stage {
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+
+  .auth-transition-stage > .auth-screen {
+    inset: 0;
+    height: auto;
+    min-height: 100dvh;
+  }
+
+  .auth-transition-stage[data-mode="login"] > .auth-screen-login,
+  .auth-transition-stage[data-mode="register"] > .auth-screen-register {
+    position: relative;
+    inset: auto;
+  }
+
+  .auth-transition-stage .auth-screen .auth-form-panel {
+    transition: transform 400ms cubic-bezier(.22, .75, .25, 1);
+  }
+
+  .auth-transition-stage .auth-screen .auth-overlay {
+    transition: none;
+    transform: none;
+    opacity: 1;
+  }
+
+  .auth-transition-stage[data-mode="register"] .auth-screen-register .auth-form-panel {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .auth-transition-stage .auth-screen .auth-form-panel,
+  .auth-transition-stage .auth-screen .auth-overlay {
+    transition-duration: 1ms !important;
   }
 }

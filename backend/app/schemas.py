@@ -1,8 +1,15 @@
-from typing import Literal
 from decimal import Decimal
 from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+
+from app.domain.orders import (
+    OrderSide,
+    OrderStatus,
+    OrderType,
+    OrderValidationError,
+    validate_order_terms,
+)
 
 
 class UserCreate(BaseModel):
@@ -36,29 +43,57 @@ class Token(BaseModel):
 
 class OrderCreate(BaseModel):
     stock_symbol: str = Field(min_length=1, max_length=20)
-    side: Literal["BUY", "SELL"]
-    order_type: Literal["MARKET", "LIMIT", "STOP", "STOP_LIMIT"] = "MARKET"
-    quantity: int = Field(gt=0)
-    limit_price: Decimal | None = Field(default=None, gt=0)
-    stop_price: Decimal | None = Field(default=None, gt=0)
+    side: OrderSide
+    order_type: OrderType = OrderType.MARKET
+    quantity: int = Field(strict=True)
+    limit_price: Decimal | None = None
+    stop_price: Decimal | None = None
     client_order_id: str | None = Field(default=None, min_length=1, max_length=100)
 
     @model_validator(mode="after")
     def validate_order_prices(self):
-        if self.order_type == "LIMIT" and self.limit_price is None:
-            raise ValueError("limit_price is required for LIMIT orders")
-        if self.order_type == "STOP" and self.stop_price is None:
-            raise ValueError("stop_price is required for STOP orders")
-        if self.order_type == "STOP_LIMIT":
-            if self.stop_price is None or self.limit_price is None:
-                raise ValueError(
-                    "stop_price and limit_price are required for STOP_LIMIT orders"
-                )
-        if self.order_type == "MARKET" and (
-            self.limit_price is not None or self.stop_price is not None
-        ):
-            raise ValueError("MARKET orders cannot include limit_price or stop_price")
+        try:
+            validate_order_terms(
+                side=self.side,
+                order_type=self.order_type,
+                quantity=self.quantity,
+                limit_price=self.limit_price,
+                stop_price=self.stop_price,
+            )
+        except OrderValidationError as exc:
+            raise ValueError(str(exc)) from exc
         return self
+
+
+class OrderModify(BaseModel):
+    """Partial update for the mutable terms of an existing paper order."""
+
+    quantity: int | None = Field(default=None, strict=True)
+    limit_price: Decimal | None = None
+    stop_price: Decimal | None = None
+
+    model_config = ConfigDict(extra="forbid")
+
+    @model_validator(mode="after")
+    def require_changes(self):
+        if not self.model_fields_set:
+            raise ValueError("At least one order field must be modified")
+        return self
+
+
+class FeeEstimateRequest(BaseModel):
+    side: OrderSide
+    gross_notional: Decimal = Field(gt=0)
+
+
+class FeeEstimateOut(BaseModel):
+    side: OrderSide
+    gross_notional: Decimal
+    brokerage: Decimal
+    platform: Decimal
+    taxes: Decimal
+    total_fees: Decimal
+    net_cash_effect: Decimal
 
 
 class LegacyOrderCreate(BaseModel):
@@ -69,25 +104,34 @@ class LegacyOrderCreate(BaseModel):
 class OrderOut(BaseModel):
     id: int
     stock_symbol: str
-    side: str
-    order_type: str
+    side: OrderSide
+    order_type: OrderType
     quantity: int
     filled_quantity: int
+    remaining_quantity: int
     average_fill_price: float | None
     price_per_share: float | None
     total_amount: float | None
-    status: str
+    status: OrderStatus
     client_order_id: str | None = None
     limit_price: Decimal | None = None
     stop_price: Decimal | None = None
-    created_at: datetime | None = None
-    updated_at: datetime | None = None
+    stop_triggered: bool = False
+    triggered_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
 
 
 class ExecutionOut(BaseModel):
     id: int
+    execution_ref: str
     quantity: int
     execution_price: Decimal
+    gross_notional: Decimal | None = None
+    fees: Decimal | None = None
+    net_cash_effect: Decimal | None = None
+    cost_basis: Decimal | None = None
+    realized_pnl: Decimal | None = None
     executed_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
@@ -113,6 +157,9 @@ class WatchlistOut(BaseModel):
 
 class WalletOut(BaseModel):
     balance: Decimal
+    cash_balance: Decimal
+    reserved_cash: Decimal
+    available_cash: Decimal
     currency: str
     account_type: str = "PAPER"
 
@@ -123,6 +170,7 @@ class WalletTransactionOut(BaseModel):
     amount: Decimal
     balance_after: Decimal
     reference_id: int | None
+    metadata_json: dict = Field(default_factory=dict)
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
@@ -131,9 +179,29 @@ class HoldingOut(BaseModel):
     stock_symbol: str
     company_name: str
     quantity: int
+    total_quantity: int
+    reserved_quantity: int
+    available_quantity: int
     average_buy_price: float
     current_price: float
     current_value: float
+    market_value: float
     invested_value: float
     profit_loss: float
     profit_loss_percent: float
+    unrealized_pnl: float
+    unrealized_pnl_percent: float
+
+
+class PortfolioOut(BaseModel):
+    holdings: list[HoldingOut]
+    cash_balance: Decimal
+    reserved_cash: Decimal
+    available_cash: Decimal
+    market_value: Decimal
+    invested_value: Decimal
+    portfolio_value: Decimal
+    realized_pnl: Decimal
+    unrealized_pnl: Decimal
+    total_pnl: Decimal
+    portfolio_value: Decimal

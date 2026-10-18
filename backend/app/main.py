@@ -1,25 +1,61 @@
 import os
+import logging
+from datetime import datetime
 import firebase_admin
 from firebase_admin import auth as firebase_auth
 from google.oauth2 import id_token
 from google.auth.transport import requests
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 
 from app.database import get_db
 from app import models, schemas
 from app.security import hash_password, verify_password, create_access_token, get_current_user
 from app.services.order_service import (
     execute_market_order,
-    create_limit_order,
+    order_service,
     OrderServiceError,
 )
+from app.services.accounting_service import accounting_service
+from app.services.portfolio_valuation import portfolio_valuation_service
+from app.services.trading_queries import trading_query_service, TradingQueryError
+from app.services.fee_engine import fee_engine
+from app.services.market_data import market_price_provider
 from fastapi import FastAPI
 from sqlalchemy import text
 
 from app.database import engine
 
-app = FastAPI(title="TradeX API")
+app = FastAPI(
+    title="TradeX Paper Trading API",
+    description=(
+        "TradeX is an educational paper-trading platform. Orders, cash, fills, "
+        "and portfolio values are simulated; this API does not connect to a "
+        "broker, exchange, bank, or real-money payment service."
+    ),
+    version="1.0.0",
+)
+logger = logging.getLogger(__name__)
+PAPER_AUTH_RESPONSES = {
+    401: {"description": "Authentication is required"},
+    403: {"description": "The authenticated user does not own this resource"},
+    404: {"description": "The requested resource was not found"},
+    409: {"description": "The paper order conflicts with its current state"},
+}
+
+
+@app.exception_handler(Exception)
+async def unexpected_error_handler(request: Request, exc: Exception):
+    """Return a stable client error body without leaking implementation details."""
+    logger.exception("Unhandled API error for %s %s", request.method, request.url.path)
+    return JSONResponse(
+        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+        content={"detail": "Internal server error"},
+    )
+
+
 if not firebase_admin._apps:
     firebase_admin.initialize_app()
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,6 +66,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
+    expose_headers=["X-Total-Count", "X-Limit", "X-Offset"],
 )
 
 
@@ -51,173 +88,226 @@ def database_check():
     }
 
 
-@app.get("/stocks")
-def list_stocks():
-    with engine.connect() as connection:
-        result = connection.execute(
-            text(
-                """
-                SELECT symbol, company_name, current_price
-                FROM stocks
-                WHERE is_active = TRUE
-                ORDER BY symbol
-                """
-            )
+def _set_page_headers(response: Response, *, total: int, limit: int, offset: int) -> None:
+    response.headers["X-Total-Count"] = str(total)
+    response.headers["X-Limit"] = str(limit)
+    response.headers["X-Offset"] = str(offset)
+
+
+def _raise_query_error(exc: TradingQueryError) -> None:
+    raise HTTPException(status_code=exc.status_code, detail=exc.message) from exc
+
+
+@app.get(
+    "/stocks",
+    tags=["Paper market"],
+    summary="List active simulated instruments",
+    description="Returns current stored paper-market prices; this endpoint does not generate or fetch market prices.",
+    responses={400: {"description": "Invalid page parameters"}},
+)
+def list_stocks(
+    response: Response,
+    limit: int = Query(default=100, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    search: str | None = Query(default=None, max_length=100),
+    db: Session = Depends(get_db),
+):
+    try:
+        stocks, total = trading_query_service.list_stocks(
+            db, limit=limit, offset=offset, search=search
         )
+    except TradingQueryError as exc:
+        _raise_query_error(exc)
+    _set_page_headers(response, total=total, limit=limit, offset=offset)
+    return {"stocks": [
+        {
+            "symbol": stock.symbol,
+            "company_name": stock.company_name,
+            "current_price": float(market_price_provider.get_quote(stock).price),
+        }
+        for stock in stocks
+    ]}
 
-        stocks = [
-            {
-                "symbol": row.symbol,
-                "company_name": row.company_name,
-                "current_price": float(row.current_price),
-            }
-            for row in result
-        ]
 
-    return {"stocks": stocks}
-
-
-@app.get("/stocks/{symbol}/quote")
+@app.get(
+    "/stocks/{symbol}/quote",
+    tags=["Paper market"],
+    summary="Get a stored paper-market quote",
+    description="Returns the configured TradeX paper-market price; this endpoint does not fetch external market data.",
+    responses={404: {"description": "Instrument not found"}},
+)
 def get_stock_quote(symbol: str, db: Session = Depends(get_db)):
-    stock = (
-        db.query(models.Stock)
-        .filter(models.Stock.symbol == symbol.strip().upper(), models.Stock.is_active.is_(True))
-        .first()
-    )
-    if stock is None:
-        raise HTTPException(status_code=404, detail="Stock not found")
+    try:
+        stock = trading_query_service.get_quote(db, symbol=symbol)
+    except TradingQueryError as exc:
+        _raise_query_error(exc)
+    quote = market_price_provider.get_quote(stock)
     return {
         "symbol": stock.symbol,
         "company_name": stock.company_name,
-        "price": stock.current_price,
-        "updated_at": stock.updated_at,
+        "price": quote.price,
+        "updated_at": quote.observed_at,
         "data_mode": "SIMULATED",
     }
 
 
-@app.get("/wallet", response_model=schemas.WalletOut)
+@app.get("/wallet", response_model=schemas.WalletOut, tags=["Paper account"], description="Read the authenticated user's virtual wallet. No real-money balance is supported.", responses=PAPER_AUTH_RESPONSES)
 def get_wallet(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    wallet = db.query(models.Wallet).filter(models.Wallet.user_id == current_user.id).first()
-    if wallet is None:
-        raise HTTPException(status_code=404, detail="Virtual wallet not found")
-    return schemas.WalletOut(balance=wallet.balance, currency=wallet.currency)
+    try:
+        summary = trading_query_service.get_wallet_summary(
+            db, user_id=current_user.id
+        )
+    except TradingQueryError as exc:
+        _raise_query_error(exc)
+    return schemas.WalletOut(**summary)
 
 
-@app.get("/wallet/transactions", response_model=list[schemas.WalletTransactionOut])
+@app.get("/wallet/transactions", response_model=list[schemas.WalletTransactionOut], tags=["Paper account"], description="Read this user's simulated wallet ledger. Results are paginated.", responses=PAPER_AUTH_RESPONSES)
 def get_wallet_transactions(
+    response: Response,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    transaction_type: str | None = Query(default=None, max_length=30),
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    wallet = db.query(models.Wallet).filter(models.Wallet.user_id == current_user.id).first()
-    if wallet is None:
-        raise HTTPException(status_code=404, detail="Virtual wallet not found")
-    return (
-        db.query(models.WalletTransaction)
-        .filter(models.WalletTransaction.wallet_id == wallet.id)
-        .order_by(models.WalletTransaction.created_at.desc(), models.WalletTransaction.id.desc())
-        .all()
+    try:
+        rows, total = trading_query_service.list_wallet_transactions(
+            db, user_id=current_user.id, limit=limit, offset=offset,
+            transaction_type=transaction_type, created_from=created_from,
+            created_to=created_to,
+        )
+    except TradingQueryError as exc:
+        _raise_query_error(exc)
+    _set_page_headers(response, total=total, limit=limit, offset=offset)
+    return rows
+
+
+@app.post(
+    "/fees/estimate",
+    response_model=schemas.FeeEstimateOut,
+    tags=["Paper orders"],
+    summary="Estimate simulated paper-trading fees",
+    description="Estimates the configured virtual trading charges for an order notional. This does not submit an order.",
+    responses={401: {"description": "Authentication is required"}, 422: {"description": "Invalid estimate request"}},
+)
+def estimate_order_fees(
+    payload: schemas.FeeEstimateRequest,
+    current_user: models.User = Depends(get_current_user),
+):
+    del current_user  # Authentication scopes access to account trading tools.
+    estimate = fee_engine.estimate_order(
+        side=payload.side.value,
+        gross_notional=payload.gross_notional,
     )
+    return schemas.FeeEstimateOut(**estimate)
 
 
-@app.get("/watchlist", response_model=list[schemas.WatchlistOut])
+@app.get("/watchlist", response_model=list[schemas.WatchlistOut], tags=["Paper account"], description="Lists only this authenticated user's saved paper-market instruments.", responses=PAPER_AUTH_RESPONSES)
 def get_watchlist(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    rows = (
-        db.query(models.WatchlistItem, models.Stock)
-        .join(models.Stock, models.Stock.id == models.WatchlistItem.stock_id)
-        .filter(models.WatchlistItem.user_id == current_user.id)
-        .order_by(models.WatchlistItem.created_at.desc())
-        .all()
-    )
+    rows = trading_query_service.list_watchlist(db, user_id=current_user.id)
     return [
         schemas.WatchlistOut(
             symbol=stock.symbol,
             company_name=stock.company_name,
-            current_price=stock.current_price,
+            current_price=market_price_provider.get_quote(stock).price,
             created_at=item.created_at,
         )
         for item, stock in rows
     ]
 
 
-@app.post("/watchlist", response_model=schemas.WatchlistOut, status_code=status.HTTP_201_CREATED)
+@app.post("/watchlist", response_model=schemas.WatchlistOut, status_code=status.HTTP_201_CREATED, tags=["Paper account"], description="Adds a simulated-market instrument to the authenticated user's watchlist.", responses=PAPER_AUTH_RESPONSES)
 def add_watchlist_item(
     payload: schemas.WatchlistCreate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    symbol = payload.symbol.strip().upper()
-    stock = db.query(models.Stock).filter(models.Stock.symbol == symbol, models.Stock.is_active.is_(True)).first()
-    if stock is None:
-        raise HTTPException(status_code=404, detail="Stock not found")
-    item = (
-        db.query(models.WatchlistItem)
-        .filter(models.WatchlistItem.user_id == current_user.id, models.WatchlistItem.stock_id == stock.id)
-        .first()
-    )
-    if item is None:
-        item = models.WatchlistItem(user_id=current_user.id, stock_id=stock.id)
-        db.add(item)
-        db.commit()
-        db.refresh(item)
+    try:
+        item, stock = trading_query_service.add_watchlist_item(
+            db, user_id=current_user.id, symbol=payload.symbol
+        )
+    except TradingQueryError as exc:
+        _raise_query_error(exc)
     return schemas.WatchlistOut(
         symbol=stock.symbol,
         company_name=stock.company_name,
-        current_price=stock.current_price,
+        current_price=market_price_provider.get_quote(stock).price,
         created_at=item.created_at,
     )
 
 
-@app.delete("/watchlist/{symbol}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/watchlist/{symbol}", status_code=status.HTTP_204_NO_CONTENT, tags=["Paper account"], description="Removes an instrument from the authenticated user's watchlist.", responses=PAPER_AUTH_RESPONSES)
 def delete_watchlist_item(
     symbol: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    item = (
-        db.query(models.WatchlistItem)
-        .join(models.Stock, models.Stock.id == models.WatchlistItem.stock_id)
-        .filter(models.WatchlistItem.user_id == current_user.id, models.Stock.symbol == symbol.strip().upper())
-        .first()
-    )
-    if item is None:
-        raise HTTPException(status_code=404, detail="Watchlist item not found")
-    db.delete(item)
-    db.commit()
+    try:
+        trading_query_service.remove_watchlist_item(
+            db, user_id=current_user.id, symbol=symbol
+        )
+    except TradingQueryError as exc:
+        _raise_query_error(exc)
 @app.post("/register", response_model=schemas.UserOut, status_code=status.HTTP_201_CREATED)
 def register_user(payload: schemas.UserCreate, db: Session = Depends(get_db)):
-    existing_user = db.query(models.User).filter(models.User.email == payload.email).first()
-    if existing_user:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Email already registered")
+    try:
+        normalized_email = str(payload.email).strip().lower()
+        existing_user = db.query(models.User).filter(models.User.email == normalized_email).first()
+        if existing_user:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Email already registered")
 
-    new_user = models.User(
-        name=payload.name,
-        email=payload.email,
-        password_hash=hash_password(payload.password),
-    )
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-
-    new_wallet = models.Wallet(user_id=new_user.id)
-    db.add(new_wallet)
-    db.commit()
-
-    return new_user
+        new_user = models.User(
+            name=payload.name.strip(),
+            email=normalized_email,
+            password_hash=hash_password(payload.password),
+        )
+        db.add(new_user)
+        db.flush()
+        wallet = accounting_service.initialize_wallet(db, user_id=new_user.id)
+        db.commit()
+        db.refresh(new_user)
+        return schemas.UserOut(
+            id=new_user.id,
+            name=new_user.name,
+            email=new_user.email,
+            wallet_balance=float(wallet.available_cash),
+        )
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Email already registered",
+        ) from exc
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Registration transaction failed")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Registration failed",
+        ) from exc
 @app.post("/login", response_model=schemas.Token)
 def login_user(payload: schemas.UserLogin, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == payload.email).first()
+    user = db.query(models.User).filter(models.User.email == str(payload.email).strip().lower()).first()
 
-    if not user or not verify_password(payload.password, user.password_hash):
+    if not user or not user.password_hash or not verify_password(payload.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password",
         )
+    if not user.is_active:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is inactive")
 
     access_token = create_access_token(user_id=user.id)
     return {"access_token": access_token, "token_type": "bearer"}
@@ -312,11 +402,7 @@ def phone_login(
             db.add(user)
             db.flush()
 
-            wallet = models.Wallet(
-                user_id=user.id,
-            )
-
-            db.add(wallet)
+            accounting_service.initialize_wallet(db, user_id=user.id)
 
         # 5. Save the Firebase identity
         identity = models.UserIdentity(
@@ -437,9 +523,7 @@ def email_auth(
         db.add(user)
         db.flush()
 
-        wallet = models.Wallet(
-            user_id=user.id,
-        )
+        accounting_service.initialize_wallet(db, user_id=user.id)
 
         identity = models.UserIdentity(
             user_id=user.id,
@@ -447,7 +531,6 @@ def email_auth(
             provider_subject=firebase_uid,
         )
 
-        db.add(wallet)
         db.add(identity)
 
         db.commit()
@@ -553,11 +636,7 @@ def google_login(
             db.add(user)
             db.flush()
 
-            wallet = models.Wallet(
-                user_id=user.id,
-            )
-
-            db.add(wallet)
+            accounting_service.initialize_wallet(db, user_id=user.id)
 
         else:
             if not user.is_active:
@@ -594,67 +673,36 @@ def google_login(
     }
 @app.get("/me", response_model=schemas.UserOut)
 def read_current_user(current_user: models.User = Depends(get_current_user)):
-    return schemas.UserOut(
-        id=current_user.id,
-        name=current_user.name,
-        email=current_user.email,
-        wallet_balance=float(current_user.wallet.balance),
-    )
+    return schemas.UserOut(**trading_query_service.get_user_summary(current_user))
 @app.post(
     "/orders",
     response_model=schemas.OrderOut,
     status_code=status.HTTP_201_CREATED,
+    tags=["Paper orders"],
+    summary="Create a paper order",
+    description="Accepts and settles only simulated orders using virtual funds; no broker or exchange is contacted.",
+    responses=PAPER_AUTH_RESPONSES,
 )
 def place_order(
     payload: schemas.OrderCreate,
+    response: Response,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
     try:
-
-        # -----------------------------
-        # MARKET
-        # -----------------------------
-
-        if payload.order_type == "MARKET":
-
-            order = execute_market_order(
-                db,
-                user_id=current_user.id,
-                stock_symbol=payload.stock_symbol,
-                side=payload.side,
-                quantity=payload.quantity,
-                client_order_id=payload.client_order_id,
-            )
-
-        # -----------------------------
-        # LIMIT
-        # -----------------------------
-
-        elif payload.order_type == "LIMIT":
-
-            order = create_limit_order(
-                db,
-                user_id=current_user.id,
-                stock_symbol=payload.stock_symbol,
-                side=payload.side,
-                quantity=payload.quantity,
-                limit_price=payload.limit_price,
-                client_order_id=payload.client_order_id,
-            )
-
-        # -----------------------------
-        # STOP / STOP_LIMIT
-        # -----------------------------
-
-        else:
-
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=(
-                    f"{payload.order_type} orders are not enabled yet."
-                ),
-            )
+        order = order_service.place_order(
+            db,
+            user_id=current_user.id,
+            stock_symbol=payload.stock_symbol,
+            side=payload.side,
+            order_type=payload.order_type,
+            quantity=payload.quantity,
+            limit_price=payload.limit_price,
+            stop_price=payload.stop_price,
+            client_order_id=payload.client_order_id,
+        )
+        if getattr(order, "idempotency_replay", False):
+            response.status_code = status.HTTP_200_OK
 
     except OrderServiceError as exc:
 
@@ -666,13 +714,6 @@ def place_order(
     except HTTPException:
         raise
 
-    except Exception:
-
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Order failed, please try again",
-        )
-
     return schemas.OrderOut(
         id=order.id,
         stock_symbol=order.stock.symbol,
@@ -680,6 +721,7 @@ def place_order(
         order_type=order.order_type,
         quantity=order.quantity,
         filled_quantity=order.filled_quantity,
+        remaining_quantity=order.remaining_quantity,
         average_fill_price=(
             float(order.average_fill_price)
             if order.average_fill_price is not None
@@ -702,6 +744,8 @@ def place_order(
         client_order_id=order.client_order_id,
         limit_price=order.limit_price,
         stop_price=order.stop_price,
+        stop_triggered=order.stop_triggered,
+        triggered_at=order.triggered_at,
         created_at=order.created_at,
         updated_at=order.updated_at,
     )
@@ -745,7 +789,7 @@ def _place_legacy_order(
     except Exception:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Order failed, please try again",
+            detail="Internal server error",
         )
 
     return _order_to_schema(order)
@@ -769,6 +813,7 @@ def _order_to_schema(order: models.Order) -> schemas.OrderOut:
         order_type=order.order_type,
         quantity=order.quantity,
         filled_quantity=order.filled_quantity,
+        remaining_quantity=order.remaining_quantity,
         average_fill_price=price,
         price_per_share=price,
         total_amount=total,
@@ -776,104 +821,153 @@ def _order_to_schema(order: models.Order) -> schemas.OrderOut:
         client_order_id=order.client_order_id,
         limit_price=order.limit_price,
         stop_price=order.stop_price,
+        stop_triggered=order.stop_triggered,
+        triggered_at=order.triggered_at,
         created_at=order.created_at,
         updated_at=order.updated_at,
     )
 
 
-@app.get("/holdings", response_model=list[schemas.HoldingOut])
+@app.get("/holdings", response_model=list[schemas.HoldingOut], tags=["Paper account"], description="Returns the authenticated user's simulated positions and valuation.", responses=PAPER_AUTH_RESPONSES)
 def get_holdings(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    holdings = (
-        db.query(models.Holding)
-        .filter(models.Holding.user_id == current_user.id)
-        .all()
-    )
-
-    result = []
-    for holding in holdings:
-        stock = holding.stock
-        invested_value = holding.average_buy_price * holding.quantity
-        current_value = stock.current_price * holding.quantity
-        profit_loss = current_value - invested_value
-        profit_loss_percent = (
-            (profit_loss / invested_value) * 100
-            if invested_value > 0
-            else 0
-        )
-
-        result.append(
-            schemas.HoldingOut(
-                stock_symbol=stock.symbol,
-                company_name=stock.company_name,
-                quantity=holding.quantity,
-                average_buy_price=float(holding.average_buy_price),
-                current_price=float(stock.current_price),
-                current_value=float(current_value),
-                invested_value=float(invested_value),
-                profit_loss=float(profit_loss),
-                profit_loss_percent=round(float(profit_loss_percent), 2),
-            )
-        )
-
-    return result
+    try:
+        holdings = trading_query_service.get_holdings(db, user_id=current_user.id)
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Portfolio not found")
+    return [schemas.HoldingOut(**holding) for holding in holdings]
 
 
-@app.get("/orders", response_model=list[schemas.OrderOut])
-def get_order_history(
+@app.get("/portfolio", response_model=schemas.PortfolioOut, tags=["Paper account"], description="Returns simulated portfolio valuation for the authenticated user.", responses=PAPER_AUTH_RESPONSES)
+def get_portfolio(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    orders = (
-        db.query(models.Order)
-        .filter(models.Order.user_id == current_user.id)
-        .order_by(models.Order.created_at.desc())
-        .all()
-    )
+    try:
+        return portfolio_valuation_service.get_portfolio(
+            db, user_id=current_user.id
+        )
+    except LookupError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
+
+@app.get("/orders", response_model=list[schemas.OrderOut], tags=["Paper orders"], description="Lists only the authenticated user's paper orders. Results are paginated and filterable.", responses=PAPER_AUTH_RESPONSES)
+def get_order_history(
+    response: Response,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    status_filter: str | None = Query(default=None, alias="status"),
+    symbol: str | None = Query(default=None, max_length=20),
+    side: str | None = Query(default=None),
+    order_type: str | None = Query(default=None),
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    try:
+        orders, total = trading_query_service.list_orders(
+            db, user_id=current_user.id, limit=limit, offset=offset,
+            status=status_filter, symbol=symbol, side=side, order_type=order_type,
+            created_from=created_from, created_to=created_to,
+        )
+    except TradingQueryError as exc:
+        _raise_query_error(exc)
+    _set_page_headers(response, total=total, limit=limit, offset=offset)
     return [_order_to_schema(order) for order in orders]
 
 
-@app.get("/orders/{order_id}/executions", response_model=list[schemas.ExecutionOut])
+@app.get("/orders/{order_id}", response_model=schemas.OrderOut, tags=["Paper orders"], description="Returns one of the authenticated user's paper orders.", responses=PAPER_AUTH_RESPONSES)
+def get_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    try:
+        order = trading_query_service.get_order(
+            db, user_id=current_user.id, order_id=order_id
+        )
+    except TradingQueryError as exc:
+        _raise_query_error(exc)
+    return _order_to_schema(order)
+
+
+@app.post("/orders/{order_id}/cancel", response_model=schemas.OrderOut, tags=["Paper orders"], description="Cancels an eligible paper order and releases its remaining virtual reservation.", responses=PAPER_AUTH_RESPONSES)
+def cancel_order(
+    order_id: int,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    try:
+        order = order_service.cancel_order(db, user_id=current_user.id, order_id=order_id)
+    except OrderServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    return _order_to_schema(order)
+
+
+@app.patch("/orders/{order_id}", response_model=schemas.OrderOut, tags=["Paper orders"], description="Modifies eligible paper-order terms and recalculates virtual reservations.", responses=PAPER_AUTH_RESPONSES)
+def modify_order(
+    order_id: int,
+    payload: schemas.OrderModify,
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(get_current_user),
+):
+    try:
+        order = order_service.modify_order(
+            db,
+            user_id=current_user.id,
+            order_id=order_id,
+            changes=payload.model_dump(exclude_unset=True),
+        )
+    except OrderServiceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.message)
+    return _order_to_schema(order)
+
+
+@app.get("/orders/{order_id}/executions", response_model=list[schemas.ExecutionOut], tags=["Paper orders"], description="Lists simulated executions for an order owned by the authenticated user. Results are paginated.", responses=PAPER_AUTH_RESPONSES)
 def get_order_executions(
     order_id: int,
+    response: Response,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    executed_from: datetime | None = None,
+    executed_to: datetime | None = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    order = (
-        db.query(models.Order)
-        .filter(models.Order.id == order_id, models.Order.user_id == current_user.id)
-        .first()
-    )
-    if order is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
-    return (
-        db.query(models.Execution)
-        .filter(models.Execution.order_id == order.id)
-        .order_by(models.Execution.executed_at.asc(), models.Execution.id.asc())
-        .all()
-    )
+    try:
+        rows, total = trading_query_service.list_executions(
+            db, user_id=current_user.id, order_id=order_id, limit=limit,
+            offset=offset, executed_from=executed_from, executed_to=executed_to,
+        )
+    except TradingQueryError as exc:
+        _raise_query_error(exc)
+    _set_page_headers(response, total=total, limit=limit, offset=offset)
+    return rows
 
 
-@app.get("/orders/{order_id}/events", response_model=list[schemas.OrderEventOut])
+@app.get("/orders/{order_id}/events", response_model=list[schemas.OrderEventOut], tags=["Paper orders"], description="Lists immutable audit events for an order owned by the authenticated user. Results are paginated.", responses=PAPER_AUTH_RESPONSES)
 def get_order_events(
     order_id: int,
+    response: Response,
+    limit: int = Query(default=50, ge=1, le=100),
+    offset: int = Query(default=0, ge=0),
+    event_type: str | None = Query(default=None, max_length=40),
+    created_from: datetime | None = None,
+    created_to: datetime | None = None,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(get_current_user),
 ):
-    order = (
-        db.query(models.Order)
-        .filter(models.Order.id == order_id, models.Order.user_id == current_user.id)
-        .first()
-    )
-    if order is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Order not found")
-    return (
-        db.query(models.OrderEvent)
-        .filter(models.OrderEvent.order_id == order.id)
-        .order_by(models.OrderEvent.created_at.asc(), models.OrderEvent.id.asc())
-        .all()
-    )
+    try:
+        rows, total = trading_query_service.list_order_events(
+            db, user_id=current_user.id, order_id=order_id, limit=limit,
+            offset=offset, event_type=event_type, created_from=created_from,
+            created_to=created_to,
+        )
+    except TradingQueryError as exc:
+        _raise_query_error(exc)
+    _set_page_headers(response, total=total, limit=limit, offset=offset)
+    return rows
 

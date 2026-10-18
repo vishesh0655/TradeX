@@ -13,8 +13,8 @@ import WatchlistPage from './pages/WatchlistPage'
 import ProfilePage from './pages/ProfilePage'
 import { getStocks } from './api/stocks'
 import { signInWithPhone } from './api/auth'
-import { getProfile, getHoldings } from './api/portfolio'
-import { getOrders, placeOrder } from './api/orders'
+import { getProfile, getHoldings, getPortfolio } from './api/portfolio'
+import { getExecutions, getOrders, placeOrder } from './api/orders'
 import { getWallet, getWalletTransactions } from './api/wallet'
 import { addToWatchlist, getWatchlist, removeFromWatchlist } from './api/watchlist'
 import { getToken } from './api/client'
@@ -27,6 +27,7 @@ function App() {
   const [user, setUser] = useState(null)
   const [stocks, setStocks] = useState([])
   const [holdings, setHoldings] = useState([])
+  const [portfolio, setPortfolio] = useState(null)
   const [orders, setOrders] = useState([])
   const [wallet, setWallet] = useState(null)
   const [transactions, setTransactions] = useState([])
@@ -47,11 +48,12 @@ function App() {
     if (!authenticated || !getToken()) return undefined
     let active = true
     const load = async () => {
+      setLoading(true)
       const results = await Promise.allSettled([
-        getStocks(), getProfile(), getHoldings(), getOrders(), getWallet(), getWalletTransactions(), getWatchlist(),
+        getStocks(), getProfile(), getHoldings(), getPortfolio(), getOrders(), getWallet(), getWalletTransactions(), getWatchlist(),
       ])
       if (!active) return
-      const [market, profile, positions, orderRows, walletRow, ledger, saved] = results
+      const [market, profile, positions, portfolioRow, orderRows, walletRow, ledger, saved] = results
       const errors = {}
       if (market.status === 'fulfilled') {
         setStocks(market.value)
@@ -61,10 +63,12 @@ function App() {
       else errors.profile = profile.reason.message
       if (positions.status === 'fulfilled') setHoldings(positions.value)
       else errors.portfolio = positions.reason.message
+      if (portfolioRow.status === 'fulfilled') setPortfolio(portfolioRow.value)
+      else if (!errors.portfolio) errors.portfolio = portfolioRow.reason.message
       if (orderRows.status === 'fulfilled') setOrders(orderRows.value)
       else errors.orders = orderRows.reason.message
       if (walletRow.status === 'fulfilled') setWallet(walletRow.value)
-      else if (profile.status === 'fulfilled') setWallet({ balance: profile.value.wallet_balance, currency: 'INR' })
+      else if (profile.status === 'fulfilled') setWallet({ balance: profile.value.wallet_balance, available_cash: profile.value.wallet_balance, currency: 'INR' })
       else errors.wallet = walletRow.reason.message
       if (ledger.status === 'fulfilled') setTransactions(ledger.value)
       else errors.transactions = ledger.reason.message
@@ -83,6 +87,7 @@ function App() {
       setUser(null)
       setWallet(null)
       setHoldings([])
+      setPortfolio(null)
       setOrders([])
       setTransactions([])
       setWatchlist([])
@@ -100,6 +105,7 @@ function App() {
     setUser(null)
     setWallet(null)
     setHoldings([])
+    setPortfolio(null)
     setOrders([])
     setTransactions([])
     setWatchlist([])
@@ -119,10 +125,22 @@ function App() {
   }
 
   const submitOrder = useCallback(async (payload) => {
-    const order = await placeOrder(payload)
-    notify(`${order.stock_symbol} ${order.side} order submitted · ${order.status.replaceAll('_', ' ')}`)
-    setRefreshId((value) => value + 1)
-    return order
+    try {
+      const order = await placeOrder(payload)
+      let actualFees = null
+      try {
+        const fills = await getExecutions(order.id)
+        if (fills.length) actualFees = fills.reduce((total, fill) => total + Number(fill.fees || 0), 0)
+      } catch {
+        // A detail-read failure must not make a successfully submitted order look failed.
+      }
+      notify(`Order #${order.id} ${order.status.replaceAll('_', ' ').toLowerCase()}`)
+      setRefreshId((value) => value + 1)
+      return { ...order, actual_fees: actualFees }
+    } catch (error) {
+      notify(error.message || 'Order could not be submitted.', 'error')
+      throw error
+    }
   }, [notify])
 
   const toggleWatchlist = useCallback(async (symbol) => {
@@ -140,36 +158,51 @@ function App() {
     } catch (error) { notify(error.message, 'error') }
   }, [notify, watchlist])
 
-  const walletBalance = Number(wallet?.balance ?? user?.wallet_balance ?? 0)
-  const activePageTitle = useMemo(() => ({ dashboard: 'Dashboard', markets: 'Markets', watchlist: 'Watchlist', portfolio: 'Portfolio', orders: 'Orders', wallet: 'Virtual wallet', profile: 'Profile' })[activePage], [activePage])
+  const walletBalance = Number(wallet?.available_cash ?? wallet?.balance ?? user?.wallet_balance ?? 0)
+  const activePageTitle = useMemo(() => ({ dashboard: 'Dashboard', markets: 'Markets', watchlist: 'Watchlist', portfolio: 'Portfolio', orders: 'Orders', wallet: 'Balance', profile: 'Profile' })[activePage], [activePage])
   const pageErrorKeys = {
     dashboard: ['profile', 'market', 'portfolio', 'orders'],
     markets: ['market'],
     watchlist: ['watchlist'],
-    portfolio: ['portfolio'],
-    orders: ['orders'],
-    wallet: ['wallet', 'transactions'],
+    portfolio: [],
+    orders: [],
+    wallet: [],
     profile: ['profile'],
   }
   const activeErrors = (pageErrorKeys[activePage] || []).map((key) => sectionErrors[key]).filter(Boolean)
 
   if (!authenticated) {
-    if (authView === 'register') return <Register onRegisterSuccess={() => setAuthView('login')} onSwitchToLogin={() => setAuthView('login')} onSwitchToPhone={() => setAuthView('phone')} />
     if (authView === 'phone') return <PhoneLoginPage onPhoneLogin={handlePhoneLogin} onBack={() => setAuthView('login')} />
-    return <Login onLoginSuccess={handleLoginSuccess} onSwitchToRegister={() => setAuthView('register')} onSwitchToPhone={() => setAuthView('phone')} />
+    const isRegisterView = authView === 'register'
+    return (
+      <div className="auth-transition-stage" data-mode={isRegisterView ? 'register' : 'login'}>
+        <Login
+          isActive={!isRegisterView}
+          onLoginSuccess={handleLoginSuccess}
+          onSwitchToRegister={() => setAuthView('register')}
+          onSwitchToPhone={() => setAuthView('phone')}
+        />
+        <Register
+          isActive={isRegisterView}
+          onRegisterSuccess={() => setAuthView('login')}
+          onSwitchToLogin={() => setAuthView('login')}
+          onSwitchToPhone={() => setAuthView('phone')}
+        />
+      </div>
+    )
   }
 
-  const common = { stocks, holdings, orders, walletBalance, watchlist, loading, onNavigate: setActivePage }
+  const common = { stocks, holdings, orders, portfolio, wallet, walletBalance, watchlist, loading, onNavigate: setActivePage }
   return <>
     <TradingShell active={activePage} onNavigate={setActivePage} user={user} walletBalance={walletBalance} stocks={stocks} onLogout={handleLogout} onSelectStock={setSelectedSymbol}>
       {activeErrors.map((error, index) => <div key={`${activePage}-${index}`} className="page-error" role="alert">{error} <button onClick={() => setRefreshId((value) => value + 1)}>Retry</button></div>)}
-      <div className="page-heading-mobile"><span>{activePageTitle}</span><span className="mobile-paper">PAPER</span></div>
+      <div className="page-heading-mobile"><span>{activePageTitle}</span></div>
       {activePage === 'dashboard' && <DashboardPage {...common} selectedSymbol={selectedSymbol} setSelectedSymbol={setSelectedSymbol} onPlaceOrder={submitOrder} onToggleWatchlist={toggleWatchlist} />}
-      {activePage === 'markets' && <MarketsPage stocks={stocks} selectedSymbol={selectedSymbol} setSelectedSymbol={setSelectedSymbol} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} loading={loading} walletBalance={walletBalance} holdings={holdings} onPlaceOrder={submitOrder} />}
+      {activePage === 'markets' && <MarketsPage stocks={stocks} selectedSymbol={selectedSymbol} setSelectedSymbol={setSelectedSymbol} watchlist={watchlist} onToggleWatchlist={toggleWatchlist} loading={loading} wallet={wallet} holdings={holdings} onPlaceOrder={submitOrder} />}
       {activePage === 'watchlist' && <WatchlistPage watchlist={watchlist} onToggleWatchlist={toggleWatchlist} onSelectStock={setSelectedSymbol} stocks={stocks} loading={loading} onNavigate={setActivePage} />}
-      {activePage === 'portfolio' && <PortfolioPage holdings={holdings} walletBalance={walletBalance} loading={loading} onNavigate={setActivePage} />}
-      {activePage === 'orders' && <OrdersPage orders={orders} loading={loading} refresh={() => setRefreshId((value) => value + 1)} />}
-      {activePage === 'wallet' && <WalletPage walletBalance={walletBalance} transactions={transactions} loading={loading} />}
+      {activePage === 'portfolio' && <PortfolioPage portfolio={portfolio} loading={loading} onNavigate={setActivePage} retry={() => setRefreshId((value) => value + 1)} error={sectionErrors.portfolio} />}
+      {activePage === 'orders' && <OrdersPage orders={orders} loading={loading} refresh={() => setRefreshId((value) => value + 1)} error={sectionErrors.orders} notify={notify} />}
+      {activePage === 'wallet' && <WalletPage wallet={wallet} transactions={transactions} loading={loading} retry={() => setRefreshId((value) => value + 1)} error={sectionErrors.wallet || sectionErrors.transactions} />}
       {activePage === 'profile' && <ProfilePage user={user} walletBalance={walletBalance} onLogout={handleLogout} />}
     </TradingShell>
     <Toast items={toasts} dismiss={dismissToast} />

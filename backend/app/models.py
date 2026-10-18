@@ -11,6 +11,7 @@ from sqlalchemy import (
     CheckConstraint,
     UniqueConstraint,
     text,
+    event,
 )
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
@@ -120,6 +121,10 @@ class Wallet(Base):
         server_default=text("1000000.00"),
     )
 
+    reserved_cash = Column(
+        Numeric(14, 2), nullable=False, server_default=text("0.00")
+    )
+
     currency = Column(
         CHAR(3),
         nullable=False,
@@ -143,6 +148,10 @@ class Wallet(Base):
             "balance >= 0",
             name="wallets_balance_check",
         ),
+        CheckConstraint(
+            "reserved_cash >= 0 AND reserved_cash <= balance",
+            name="wallets_reserved_cash_check",
+        ),
     )
 
     user = relationship(
@@ -155,6 +164,14 @@ class Wallet(Base):
         back_populates="wallet",
         cascade="all, delete-orphan",
     )
+
+    @property
+    def available_cash(self):
+        return self.balance - self.reserved_cash
+
+    @property
+    def cash_balance(self):
+        return self.balance
 
 
 class WalletTransaction(Base):
@@ -187,6 +204,12 @@ class WalletTransaction(Base):
         BigInteger,
         ForeignKey("orders.id"),
         nullable=True,
+    )
+
+    metadata_json = Column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
 
     created_at = Column(
@@ -295,7 +318,7 @@ class Order(Base):
         nullable=False,
     )
 
-    # NEW, OPEN, PARTIALLY_FILLED, FILLED, CANCELLED, REJECTED
+    # NEW, OPEN, PARTIALLY_FILLED, FILLED, CANCEL_PENDING, CANCELLED, REJECTED, EXPIRED
     status = Column(
         String(20),
         nullable=False,
@@ -322,6 +345,10 @@ class Order(Base):
         Numeric(14, 2),
         nullable=True,
     )
+
+    stop_triggered = Column(Boolean, nullable=False, server_default=text("false"))
+
+    triggered_at = Column(TIMESTAMP(timezone=True), nullable=True)
 
     average_fill_price = Column(
         Numeric(14, 2),
@@ -395,6 +422,24 @@ class Order(Base):
             name="orders_stop_price_check",
         ),
 
+        CheckConstraint(
+            "(order_type = 'MARKET' AND limit_price IS NULL AND stop_price IS NULL) OR "
+            "(order_type = 'LIMIT' AND limit_price IS NOT NULL AND stop_price IS NULL) OR "
+            "(order_type = 'STOP' AND limit_price IS NULL AND stop_price IS NOT NULL) OR "
+            "(order_type = 'STOP_LIMIT' AND limit_price IS NOT NULL AND stop_price IS NOT NULL)",
+            name="orders_price_fields_by_type_check",
+        ),
+
+        CheckConstraint(
+            "(stop_triggered = false AND triggered_at IS NULL) OR "
+            "(stop_triggered = true AND triggered_at IS NOT NULL)",
+            name="orders_stop_trigger_timestamp_check",
+        ),
+        CheckConstraint(
+            "order_type IN ('STOP', 'STOP_LIMIT') OR stop_triggered = false",
+            name="orders_stop_trigger_type_check",
+        ),
+
         UniqueConstraint(
             "user_id",
             "client_order_id",
@@ -425,6 +470,16 @@ class Order(Base):
         order_by="OrderEvent.created_at",
     )
 
+    reservation = relationship(
+        "OrderReservation", back_populates="order", uselist=False,
+        cascade="all, delete-orphan",
+    )
+
+    @property
+    def remaining_quantity(self) -> int:
+        """Quantity not yet filled; derived to avoid a second source of truth."""
+        return self.quantity - self.filled_quantity
+
 
 class OrderEvent(Base):
     """Append-only application audit event for an order lifecycle change."""
@@ -449,11 +504,24 @@ class OrderEvent(Base):
     order = relationship("Order", back_populates="events")
 
 
+def _reject_order_event_mutation(mapper, connection, target):
+    raise ValueError("Order audit events are immutable")
+
+
+event.listen(OrderEvent, "before_update", _reject_order_event_mutation)
+event.listen(OrderEvent, "before_delete", _reject_order_event_mutation)
+
+
 class WatchlistItem(Base):
     __tablename__ = "watchlist_items"
 
     id = Column(BigInteger, primary_key=True)
-    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     stock_id = Column(BigInteger, ForeignKey("stocks.id", ondelete="CASCADE"), nullable=False)
     created_at = Column(
         TIMESTAMP(timezone=True),
@@ -481,6 +549,8 @@ class Execution(Base):
         nullable=False,
     )
 
+    execution_ref = Column(String(100), nullable=False, unique=True)
+
     quantity = Column(
         Integer,
         nullable=False,
@@ -490,6 +560,12 @@ class Execution(Base):
         Numeric(14, 2),
         nullable=False,
     )
+
+    gross_notional = Column(Numeric(14, 2), nullable=True)
+    fees = Column(Numeric(14, 2), nullable=True)
+    net_cash_effect = Column(Numeric(14, 2), nullable=True)
+    cost_basis = Column(Numeric(14, 2), nullable=True)
+    realized_pnl = Column(Numeric(14, 2), nullable=True)
 
     executed_at = Column(
         TIMESTAMP(timezone=True),
@@ -507,12 +583,23 @@ class Execution(Base):
             "execution_price > 0",
             name="executions_price_check",
         ),
+        CheckConstraint("gross_notional >= 0", name="executions_gross_notional_check"),
+        CheckConstraint("fees >= 0", name="executions_fees_check"),
+        CheckConstraint("cost_basis >= 0", name="executions_cost_basis_check"),
     )
 
     order = relationship(
         "Order",
         back_populates="executions",
     )
+
+
+def _reject_wallet_ledger_mutation(mapper, connection, target):
+    raise ValueError("Wallet ledger entries are immutable")
+
+
+event.listen(WalletTransaction, "before_update", _reject_wallet_ledger_mutation)
+event.listen(WalletTransaction, "before_delete", _reject_wallet_ledger_mutation)
 
 
 class Holding(Base):
@@ -540,9 +627,17 @@ class Holding(Base):
         nullable=False,
     )
 
+    reserved_quantity = Column(Integer, nullable=False, server_default=text("0"))
+
     average_buy_price = Column(
         Numeric(14, 2),
         nullable=False,
+    )
+
+    cost_basis = Column(
+        Numeric(14, 2),
+        nullable=False,
+        server_default=text("0.00"),
     )
 
     created_at = Column(
@@ -568,10 +663,15 @@ class Holding(Base):
             "average_buy_price > 0",
             name="holdings_average_buy_price_check",
         ),
+        CheckConstraint("cost_basis >= 0", name="holdings_cost_basis_check"),
 
         CheckConstraint(
             "quantity > 0",
             name="holdings_quantity_check",
+        ),
+        CheckConstraint(
+            "reserved_quantity >= 0 AND reserved_quantity <= quantity",
+            name="holdings_reserved_quantity_check",
         ),
     )
 
@@ -584,3 +684,43 @@ class Holding(Base):
         "Stock",
         back_populates="holdings",
     )
+
+    @property
+    def total_quantity(self):
+        return self.quantity
+
+    @property
+    def available_quantity(self):
+        return self.quantity - self.reserved_quantity
+
+
+class OrderReservation(Base):
+    """Current reserved paper assets for an order, retained after release."""
+
+    __tablename__ = "order_reservations"
+
+    id = Column(BigInteger, primary_key=True)
+    order_id = Column(BigInteger, ForeignKey("orders.id", ondelete="CASCADE"), nullable=False, unique=True)
+    user_id = Column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    stock_id = Column(BigInteger, ForeignKey("stocks.id"), nullable=False, index=True)
+    side = Column(String(4), nullable=False)
+    reserved_cash = Column(Numeric(14, 2), nullable=False, server_default=text("0.00"))
+    reserved_quantity = Column(Integer, nullable=False, server_default=text("0"))
+    unit_price = Column(Numeric(14, 2), nullable=True)
+    state = Column(String(12), nullable=False, server_default=text("'ACTIVE'"))
+    created_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+    updated_at = Column(TIMESTAMP(timezone=True), nullable=False, server_default=text("CURRENT_TIMESTAMP"))
+
+    __table_args__ = (
+        CheckConstraint("side IN ('BUY', 'SELL')", name="order_reservations_side_check"),
+        CheckConstraint("reserved_cash >= 0", name="order_reservations_cash_check"),
+        CheckConstraint("reserved_quantity >= 0", name="order_reservations_quantity_check"),
+        CheckConstraint("state IN ('ACTIVE', 'RELEASED', 'SETTLED')", name="order_reservations_state_check"),
+        CheckConstraint(
+            "(side = 'BUY' AND reserved_quantity = 0 AND unit_price IS NOT NULL) OR "
+            "(side = 'SELL' AND reserved_cash = 0 AND unit_price IS NULL)",
+            name="order_reservations_assets_by_side_check",
+        ),
+    )
+
+    order = relationship("Order", back_populates="reservation")

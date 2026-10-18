@@ -1,10 +1,17 @@
 from decimal import Decimal
+from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
 from app import models
+from app.domain.orders import OrderType, OrderValidationError
 from app.services.execution_engine import PaperExecutionEngine
-from app.services.order_lifecycle import transition_order
+from app.services.accounting_service import AccountingService
+from app.services.fee_engine import fee_engine
+from app.services.order_lifecycle import InvalidOrderTransition, transition_order
+from app.services.risk_engine import RiskEngine, RiskRejected
+from app.services.market_data import MarketPriceProvider, market_price_provider
+from app.services.order_evaluation import OrderEvaluationService
 
 
 class OrderServiceError(Exception):
@@ -18,9 +25,16 @@ class OrderService:
     def __init__(
         self,
         execution_engine: PaperExecutionEngine | None = None,
+        price_provider: MarketPriceProvider | None = None,
+        order_evaluator: OrderEvaluationService | None = None,
     ):
         self.execution_engine = (
-            execution_engine or PaperExecutionEngine()
+            execution_engine or PaperExecutionEngine(price_provider=price_provider)
+        )
+        self.price_provider = price_provider or market_price_provider
+        self.order_evaluator = order_evaluator or OrderEvaluationService(
+            execution_engine=self.execution_engine,
+            price_provider=self.price_provider,
         )
 
     def place_order(
@@ -32,89 +46,28 @@ class OrderService:
         side: str,
         order_type: str,
         quantity: int,
-        limit_price: float | None = None,
-        stop_price: float | None = None,
+        limit_price: Decimal | int | float | str | None = None,
+        stop_price: Decimal | int | float | str | None = None,
         client_order_id: str | None = None,
     ) -> models.Order:
-
-        side = side.strip().upper()
-        order_type = order_type.strip().upper()
+        try:
+            side, order_type, limit_price, stop_price = RiskEngine.validate_terms(
+                side=side,
+                order_type=order_type,
+                quantity=quantity,
+                limit_price=limit_price,
+                stop_price=stop_price,
+            )
+        except OrderValidationError as exc:
+            raise OrderServiceError(str(exc)) from exc
         symbol = stock_symbol.strip().upper()
-
-        # -----------------------------
-        # Basic validation
-        # -----------------------------
-
-        if side not in {"BUY", "SELL"}:
-            raise OrderServiceError("Side must be BUY or SELL")
-
-        if order_type not in {
-            "MARKET",
-            "LIMIT",
-            "STOP",
-            "STOP_LIMIT",
-        }:
-            raise OrderServiceError("Unsupported order type")
-
-        if quantity <= 0:
-            raise OrderServiceError("Quantity must be positive")
 
         if not symbol:
             raise OrderServiceError("Stock symbol is required")
 
-        # -----------------------------
-        # Price validation
-        # -----------------------------
-
-        if order_type == "LIMIT" and limit_price is None:
-            raise OrderServiceError(
-                "limit_price is required for LIMIT orders"
-            )
-
-        if order_type == "STOP" and stop_price is None:
-            raise OrderServiceError(
-                "stop_price is required for STOP orders"
-            )
-
-        if order_type == "STOP_LIMIT":
-            if stop_price is None or limit_price is None:
-                raise OrderServiceError(
-                    "stop_price and limit_price are required "
-                    "for STOP_LIMIT orders"
-                )
-
-        if order_type == "MARKET":
-            if limit_price is not None or stop_price is not None:
-                raise OrderServiceError(
-                    "MARKET orders cannot include limit_price "
-                    "or stop_price"
-                )
-
         try:
-            # -----------------------------
-            # Find stock
-            # -----------------------------
-
-            stock = (
-                db.query(models.Stock)
-                .filter(
-                    models.Stock.symbol == symbol,
-                    models.Stock.is_active.is_(True),
-                )
-                .with_for_update()
-                .first()
-            )
-
-            if not stock:
-                raise OrderServiceError(
-                    "Stock not found",
-                    404,
-                )
-
-            # -----------------------------
-            # Wallet
-            # -----------------------------
-
+            # Serialize all risk decisions for this account before reading
+            # purchasing power; never lock a shared Stock row globally.
             wallet = (
                 db.query(models.Wallet)
                 .filter(
@@ -124,29 +77,48 @@ class OrderService:
                 .first()
             )
 
-            if not wallet:
-                raise OrderServiceError(
-                    "Wallet not found",
-                    404,
-                )
+            user = db.query(models.User).filter(models.User.id == user_id).first()
+            try:
+                RiskEngine.validate_account(user, wallet)
+            except RiskRejected as exc:
+                raise OrderServiceError(str(exc), 403 if user is None or not user.is_active else 404) from exc
+
+            stock = (
+                db.query(models.Stock)
+                .filter(models.Stock.symbol == symbol)
+                .first()
+            )
+            if not stock:
+                raise OrderServiceError("Stock not found", 404)
 
             # -----------------------------
             # Idempotency
             # -----------------------------
 
-            if client_order_id:
-                existing_order = (
-                    db.query(models.Order)
-                    .filter(
-                        models.Order.user_id == user_id,
-                        models.Order.client_order_id
-                        == client_order_id,
-                    )
-                    .first()
+            try:
+                existing_order = RiskEngine.find_idempotent_order(
+                    db,
+                    user_id=user_id,
+                    client_order_id=client_order_id,
+                    symbol=symbol,
+                    side=side.value,
+                    order_type=order_type.value,
+                    quantity=quantity,
+                    limit_price=limit_price,
+                    stop_price=stop_price,
                 )
+            except RiskRejected as exc:
+                raise OrderServiceError(str(exc), exc.status_code) from exc
+            if existing_order is not None:
+                db.rollback()
+                existing_order.idempotency_replay = True
+                return existing_order
 
-                if existing_order:
-                    return existing_order
+            if not stock.is_active:
+                raise OrderServiceError("Instrument is not tradable", 409)
+            # Use the stored paper quote for both immediate MARKET settlement
+            # and first eligibility evaluation of newly accepted resting orders.
+            quote = self.price_provider.get_quote(stock)
 
             # -----------------------------
             # Existing holding
@@ -166,64 +138,65 @@ class OrderService:
             # SELL validation
             # -----------------------------
 
-            if side == "SELL":
-
-                if holding is None:
-                    raise OrderServiceError(
-                        "You do not own this stock"
-                    )
-
-                if holding.quantity < quantity:
-                    raise OrderServiceError(
-                        f"Insufficient shares. "
-                        f"You own {holding.quantity} "
-                        f"but tried to sell {quantity}"
-                    )
-
             # -----------------------------
             # Create order
             # -----------------------------
 
-            order_status = (
-                "NEW"
-                if order_type == "MARKET"
-                else "OPEN"
-            )
-
             order = models.Order(
                 user_id=user_id,
                 stock_id=stock.id,
-                side=side,
-                order_type=order_type,
-                status=order_status,
+                side=side.value,
+                order_type=order_type.value,
+                status="NEW",
                 quantity=quantity,
                 filled_quantity=0,
-                limit_price=(
-                    Decimal(str(limit_price))
-                    if limit_price is not None
-                    else None
-                ),
-                stop_price=(
-                    Decimal(str(stop_price))
-                    if stop_price is not None
-                    else None
-                ),
+                limit_price=limit_price,
+                stop_price=stop_price,
                 client_order_id=client_order_id,
             )
 
             db.add(order)
             db.flush()
             db.add(models.OrderEvent(order_id=order.id, event_type="ORDER_CREATED", metadata_json={
-                "side": side,
-                "order_type": order_type,
+                "source": "order_api",
+                "actor": "user",
+                "actor_user_id": user_id,
+                "side": side.value,
+                "order_type": order_type.value,
                 "quantity": quantity,
             }))
+
+            transition_order(db, order, "OPEN", event_type="ORDER_OPENED")
+
+            try:
+                reservation = RiskEngine.reserve_order(
+                    db,
+                    order=order,
+                    stock=stock,
+                    wallet=wallet,
+                    holding=holding,
+                    quote=quote,
+                )
+            except RiskRejected as exc:
+                raise OrderServiceError(str(exc), 400) from exc
+
+            db.add(models.OrderEvent(
+                order_id=order.id,
+                event_type="ORDER_ACCEPTED",
+                metadata_json={
+                    "source": "order_service",
+                    "actor": "system",
+                    "status": order.status,
+                    "quantity": order.quantity,
+                    "remaining_quantity": order.remaining_quantity,
+                },
+            ))
 
             # -----------------------------
             # MARKET execution
             # -----------------------------
 
-            if order_type == "MARKET":
+            if order_type is OrderType.MARKET:
 
                 try:
                     self.execution_engine.execute_market(
@@ -232,34 +205,24 @@ class OrderService:
                         stock=stock,
                         wallet=wallet,
                         holding=holding,
+                        reservation=reservation,
+                        quote=quote,
                     )
                 except ValueError as exc:
                     raise OrderServiceError(
                         str(exc)
                     )
 
-            # -----------------------------
-            # LIMIT order
-            # -----------------------------
-
-            elif order_type == "LIMIT":
-
-                # LIMIT orders are only created here.
-                # Matching/execution will be implemented
-                # in the next step.
-                transition_order(db, order, "OPEN", event_type="ORDER_OPENED")
-
-            # -----------------------------
-            # STOP / STOP_LIMIT
-            # -----------------------------
-
-            elif order_type in {
-                "STOP",
-                "STOP_LIMIT",
-            }:
-
-                raise OrderServiceError(
-                    f"{order_type} orders are not enabled yet"
+            # Non-market orders are tested against the current stored paper
+            # quote once at acceptance. If not eligible, they remain OPEN with
+            # their reservation. Future supplied prices use the same evaluator.
+            if order_type is not OrderType.MARKET:
+                self.order_evaluator.evaluate_open_orders(
+                    db,
+                    stock_symbol=symbol,
+                    current_price=quote.price,
+                    order_id=order.id,
+                    commit=False,
                 )
 
             db.commit()
@@ -271,6 +234,312 @@ class OrderService:
             db.rollback()
             raise
 
+        except Exception:
+            db.rollback()
+            raise
+
+    def cancel_order(self, db: Session, *, user_id: int, order_id: int) -> models.Order:
+        """Cancel an open order and release its unfilled paper assets atomically."""
+        try:
+            wallet = (
+                db.query(models.Wallet)
+                .filter(models.Wallet.user_id == user_id)
+                .with_for_update()
+                .first()
+            )
+            if wallet is None:
+                raise OrderServiceError("Wallet not found", 404)
+            order = (
+                db.query(models.Order)
+                .filter(models.Order.id == order_id)
+                .with_for_update()
+                .first()
+            )
+            if order is None:
+                raise OrderServiceError("Order not found", 404)
+            if order.user_id != user_id:
+                raise OrderServiceError("You are not allowed to access this order", 403)
+            if order.status not in {"OPEN", "PARTIALLY_FILLED"}:
+                raise OrderServiceError(
+                    f"Cannot cancel an order in {order.status} state", 409
+                )
+            holding = (
+                db.query(models.Holding)
+                .filter(
+                    models.Holding.user_id == user_id,
+                    models.Holding.stock_id == order.stock_id,
+                )
+                .with_for_update()
+                .first()
+            )
+            reservation = (
+                db.query(models.OrderReservation)
+                .filter(models.OrderReservation.order_id == order.id)
+                .with_for_update()
+                .first()
+            )
+            RiskEngine.release(
+                reservation=reservation, wallet=wallet, holding=holding, db=db
+            )
+            transition_order(db, order, "CANCELLED", event_type="ORDER_CANCELLED")
+            db.commit()
+            db.refresh(order)
+            return order
+        except OrderServiceError:
+            db.rollback()
+            raise
+        except InvalidOrderTransition as exc:
+            db.rollback()
+            raise OrderServiceError(str(exc), 409) from exc
+        except Exception:
+            db.rollback()
+            raise
+
+    def modify_order(
+        self,
+        db: Session,
+        *,
+        user_id: int,
+        order_id: int,
+        changes: dict,
+    ) -> models.Order:
+        """Modify an unfilled open order while resizing its paper reservation."""
+        if not changes:
+            raise OrderServiceError("At least one order field must be modified")
+
+        try:
+            wallet = (
+                db.query(models.Wallet)
+                .filter(models.Wallet.user_id == user_id)
+                .with_for_update()
+                .first()
+            )
+            if wallet is None:
+                raise OrderServiceError("Wallet not found", 404)
+            order = (
+                db.query(models.Order)
+                .filter(models.Order.id == order_id)
+                .with_for_update()
+                .first()
+            )
+            if order is None:
+                raise OrderServiceError("Order not found", 404)
+            if order.user_id != user_id:
+                raise OrderServiceError("You are not allowed to access this order", 403)
+            if order.status != "OPEN" or order.filled_quantity != 0 or order.stop_triggered:
+                raise OrderServiceError(
+                    "Only unfilled, untriggered OPEN orders can be modified", 409
+                )
+            before = {
+                "quantity": order.quantity,
+                "limit_price": str(order.limit_price) if order.limit_price is not None else None,
+                "stop_price": str(order.stop_price) if order.stop_price is not None else None,
+            }
+
+            allowed_fields = {
+                "MARKET": {"quantity"},
+                "LIMIT": {"quantity", "limit_price"},
+                "STOP": {"quantity", "stop_price"},
+                "STOP_LIMIT": {"quantity", "limit_price", "stop_price"},
+            }.get(order.order_type, set())
+            unexpected = set(changes) - allowed_fields
+            if unexpected:
+                raise OrderServiceError(
+                    f"Fields cannot be modified for {order.order_type} orders: "
+                    + ", ".join(sorted(unexpected))
+                )
+
+            quantity = changes.get("quantity", order.quantity)
+            limit_price = changes.get("limit_price", order.limit_price)
+            stop_price = changes.get("stop_price", order.stop_price)
+            try:
+                _, _, limit_price, stop_price = RiskEngine.validate_terms(
+                    side=order.side,
+                    order_type=order.order_type,
+                    quantity=quantity,
+                    limit_price=limit_price,
+                    stop_price=stop_price,
+                )
+            except OrderValidationError as exc:
+                raise OrderServiceError(str(exc)) from exc
+
+            stock = (
+                db.query(models.Stock)
+                .filter(models.Stock.id == order.stock_id)
+                .first()
+            )
+            if stock is None or not stock.is_active:
+                raise OrderServiceError("Instrument is not tradable", 409)
+            holding = (
+                db.query(models.Holding)
+                .filter(
+                    models.Holding.user_id == user_id,
+                    models.Holding.stock_id == order.stock_id,
+                )
+                .with_for_update()
+                .first()
+            )
+            reservation = (
+                db.query(models.OrderReservation)
+                .filter(models.OrderReservation.order_id == order.id)
+                .with_for_update()
+                .first()
+            )
+            existing_active_reservation = (
+                reservation is not None and reservation.state == "ACTIVE"
+            )
+            prior_reserved_cash = (
+                Decimal(reservation.reserved_cash) if reservation is not None else Decimal("0.00")
+            )
+            prior_reserved_quantity = (
+                reservation.reserved_quantity if reservation is not None else 0
+            )
+
+            if order.side == "BUY":
+                unit_price = (
+                    self.price_provider.get_quote(stock).price
+                    if order.order_type == OrderType.MARKET.value
+                    else Decimal(limit_price if order.order_type in {
+                        OrderType.LIMIT.value, OrderType.STOP_LIMIT.value
+                    } else stop_price)
+                )
+                gross_reserve = unit_price * quantity
+                desired_cash = gross_reserve + fee_engine.calculate(gross_reserve).total
+                if reservation is None or reservation.state != "ACTIVE":
+                    if reservation is not None:
+                        raise OrderServiceError("Order reservation is not active", 409)
+                    order.quantity = quantity
+                    order.limit_price = limit_price
+                    order.stop_price = stop_price
+                    reservation = RiskEngine.reserve_order(
+                        db, order=order, stock=stock, wallet=wallet, holding=holding
+                    )
+                else:
+                    delta = desired_cash - Decimal(reservation.reserved_cash)
+                    available = Decimal(wallet.balance) - Decimal(wallet.reserved_cash)
+                    if delta > available:
+                        raise OrderServiceError(
+                            f"Insufficient available cash. Available {available}, "
+                            f"additional required {delta}"
+                        )
+                    wallet.reserved_cash = Decimal(wallet.reserved_cash) + delta
+                    reservation.reserved_cash = desired_cash
+                    reservation.unit_price = unit_price
+                    reservation.updated_at = datetime.now(timezone.utc)
+                    wallet.updated_at = reservation.updated_at
+            else:
+                if holding is None:
+                    raise OrderServiceError("You do not own this stock", 400)
+                desired_shares = quantity
+                if reservation is None or reservation.state != "ACTIVE":
+                    if reservation is not None:
+                        raise OrderServiceError("Order reservation is not active", 409)
+                    order.quantity = quantity
+                    order.limit_price = limit_price
+                    order.stop_price = stop_price
+                    reservation = RiskEngine.reserve_order(
+                        db, order=order, stock=stock, wallet=wallet, holding=holding
+                    )
+                else:
+                    delta = desired_shares - reservation.reserved_quantity
+                    available = holding.quantity - holding.reserved_quantity
+                    if delta > available:
+                        raise OrderServiceError(
+                            f"Insufficient available shares. Available {available}, "
+                            f"additional required {delta}"
+                        )
+                    holding.reserved_quantity += delta
+                    reservation.reserved_quantity = desired_shares
+                    reservation.updated_at = datetime.now(timezone.utc)
+                    holding.updated_at = reservation.updated_at
+            order.quantity = quantity
+            order.limit_price = limit_price
+            order.stop_price = stop_price
+            order.updated_at = datetime.now(timezone.utc)
+            if existing_active_reservation and (
+                prior_reserved_cash != Decimal(reservation.reserved_cash)
+                or prior_reserved_quantity != reservation.reserved_quantity
+            ):
+                AccountingService.record_reservation(
+                    db,
+                    wallet=wallet,
+                    order_id=order.id,
+                    event_type="ORDER_RESERVATION",
+                    reserved_cash=reservation.reserved_cash - prior_reserved_cash,
+                    reserved_quantity=reservation.reserved_quantity - prior_reserved_quantity,
+                )
+            db.add(models.OrderEvent(
+                order_id=order.id,
+                event_type="ORDER_MODIFIED",
+                metadata_json={
+                    "source": "order_api",
+                    "actor": "user",
+                    "actor_user_id": user_id,
+                    "before": before,
+                    "after": {
+                        "quantity": order.quantity,
+                        "limit_price": str(order.limit_price) if order.limit_price is not None else None,
+                        "stop_price": str(order.stop_price) if order.stop_price is not None else None,
+                    },
+                    "changed_fields": sorted(changes),
+                },
+            ))
+            db.commit()
+            db.refresh(order)
+            return order
+        except OrderServiceError:
+            db.rollback()
+            raise
+        except RiskRejected as exc:
+            db.rollback()
+            raise OrderServiceError(str(exc), exc.status_code) from exc
+        except Exception:
+            db.rollback()
+            raise
+
+    def close_order(
+        self, db: Session, *, user_id: int, order_id: int, status: str
+    ) -> models.Order:
+        """Expire/reject an unfilled or open order and release its remainder."""
+        if status not in {"REJECTED", "EXPIRED"}:
+            raise OrderServiceError("Unsupported order close status")
+        try:
+            wallet = (
+                db.query(models.Wallet).filter(models.Wallet.user_id == user_id)
+                .with_for_update().first()
+            )
+            if wallet is None:
+                raise OrderServiceError("Wallet not found", 404)
+            order = (
+                db.query(models.Order)
+                .filter(models.Order.id == order_id, models.Order.user_id == user_id)
+                .with_for_update().first()
+            )
+            if order is None:
+                raise OrderServiceError("Order not found", 404)
+            holding = (
+                db.query(models.Holding)
+                .filter(models.Holding.user_id == user_id, models.Holding.stock_id == order.stock_id)
+                .with_for_update().first()
+            )
+            reservation = (
+                db.query(models.OrderReservation)
+                .filter(models.OrderReservation.order_id == order.id)
+                .with_for_update().first()
+            )
+            RiskEngine.release(
+                reservation=reservation, wallet=wallet, holding=holding, db=db
+            )
+            transition_order(db, order, status, event_type=f"ORDER_{status}")
+            db.commit()
+            db.refresh(order)
+            return order
+        except OrderServiceError:
+            db.rollback()
+            raise
+        except InvalidOrderTransition as exc:
+            db.rollback()
+            raise OrderServiceError(str(exc), 409) from exc
         except Exception:
             db.rollback()
             raise
@@ -312,7 +581,7 @@ class OrderService:
         stock_symbol: str,
         side: str,
         quantity: int,
-        limit_price: float,
+        limit_price: Decimal | int | float | str,
         client_order_id: str | None = None,
     ) -> models.Order:
 
@@ -358,7 +627,7 @@ def create_limit_order(
     stock_symbol: str,
     side: str,
     quantity: int,
-    limit_price: float,
+    limit_price: Decimal | int | float | str,
     client_order_id: str | None = None,
 ) -> models.Order:
 

@@ -10,7 +10,7 @@ import { auth } from './firebase'
 import { signInWithGoogle, signInWithVerifiedEmail } from './api/auth'
 import './Auth.css'
 
-function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
+function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone, isActive = true }) {
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
@@ -42,6 +42,8 @@ function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
   }, [onRegisterSuccess])
 
   useEffect(() => {
+    if (!isActive) return undefined
+
     const initializeGoogle = () => {
       const googleIdentity = window.google
       if (!googleIdentity || !googleButtonRef.current) {
@@ -97,7 +99,7 @@ function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
     return () => {
       script.onload = null
     }
-  }, [handleGoogleResponse])
+  }, [handleGoogleResponse, isActive])
 
   const handleSubmit = async (e) => {
   e.preventDefault()
@@ -220,23 +222,16 @@ function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
   }
 
   return (
-    <div className="auth-page">
+    <div className="auth-page auth-screen auth-screen-register" aria-hidden={!isActive} inert={!isActive}>
       <div className="auth-scene">
         <div className="auth-glow auth-glow-one" />
         <div className="auth-glow auth-glow-two" />
 
         <div className="auth-ticker auth-ticker-top">
-          <span><b>NIFTY 50</b> 24,812.35 <i className="up">▲0.42%</i></span>
-          <span><b>SENSEX</b> 81,205.60 <i className="up">▲0.38%</i></span>
-          <span><b>RELIANCE</b> 2,945.10 <i className="down">▼0.15%</i></span>
-          <span><b>TCS</b> 4,102.75 <i className="up">▲0.61%</i></span>
-          <span><b>INFY</b> 1,842.20 <i className="up">▲0.18%</i></span>
-
-          <span><b>NIFTY 50</b> 24,812.35 <i className="up">▲0.42%</i></span>
-          <span><b>SENSEX</b> 81,205.60 <i className="up">▲0.38%</i></span>
-          <span><b>RELIANCE</b> 2,945.10 <i className="down">▼0.15%</i></span>
-          <span><b>TCS</b> 4,102.75 <i className="up">▲0.61%</i></span>
-          <span><b>INFY</b> 1,842.20 <i className="up">▲0.18%</i></span>
+          {['MARKET OVERVIEW', 'PORTFOLIO TOOLS', 'ORDER MANAGEMENT', 'WATCHLIST', 'TRADEX',
+            'MARKET OVERVIEW', 'PORTFOLIO TOOLS', 'ORDER MANAGEMENT', 'WATCHLIST', 'TRADEX'].map((label, index) => (
+            <span key={`${label}-${index}`}><b>{label}</b></span>
+          ))}
         </div>
       </div>
 
@@ -279,7 +274,7 @@ function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
             <h1 className="auth-title">Get started</h1>
 
             <p className="auth-subtitle">
-              Create your free paper trading account
+              Create your TradeX account
             </p>
 
             <div className="auth-input-group">
@@ -402,13 +397,13 @@ function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
 
             <div className="trust-row">
               <span>
-                <i /> Virtual funds
+                <i /> Portfolio tools
               </span>
               <span>
-                <i /> Paper trading
+                <i /> Order management
               </span>
               <span>
-                <i /> Built for practice
+                <i /> Market overview
               </span>
             </div>
 
@@ -461,8 +456,8 @@ function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
 
         <div className="auth-overlay">
           <div className="feature-strip">
-            <span>PAPER TRADING</span>
-            <span>LIVE UI</span>
+            <span>MARKET TOOLS</span>
+            <span>PORTFOLIO TRACKING</span>
           </div>
 
           <div className="floating-orb orb-one" />
@@ -470,27 +465,13 @@ function Register({ onRegisterSuccess, onSwitchToLogin, onSwitchToPhone }) {
 
           <div className="market-mini">
             <div className="market-top">
-              <span>NIFTY 50 · DEMO</span>
-
-              <span className="live-pill">
-                <i /> MARKET PULSE
-              </span>
+              <span>ACCOUNT OVERVIEW</span>
+              <span className="preview-pill">PORTFOLIO</span>
             </div>
-
-            <svg className="spark-chart" viewBox="0 0 250 48">
-              <path
-                className="spark-area"
-                d="M0 40 L18 34 L34 37 L52 27 L70 31 L89 20 L108 25 L127 14 L145 21 L164 12 L182 17 L202 7 L221 13 L250 3 L250 48 L0 48 Z"
-              />
-
-              <path
-                d="M0 40 L18 34 L34 37 L52 27 L70 31 L89 20 L108 25 L127 14 L145 21 L164 12 L182 17 L202 7 L221 13 L250 3"
-              />
-            </svg>
-
+            <div className="auth-preview-copy">Holdings, balances, and orders<br />in one place</div>
             <div className="market-bottom">
-              <span>Virtual portfolio</span>
-              <span>+0.42%</span>
+              <span>Account balance</span>
+              <span>Portfolio</span>
             </div>
           </div>
 

@@ -19,10 +19,6 @@ export function Icon({ name, size = 18 }) {
   return <svg aria-hidden="true" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round">{paths[name] || paths.dashboard}</svg>
 }
 
-export function PaperBadge() {
-  return <span className="paper-badge"><i /> PAPER MODE <span>VIRTUAL FUNDS</span></span>
-}
-
 export function MetricCard({ label, value, note, tone = 'neutral', icon }) {
   return <article className="metric-card"><div className="metric-top"><span>{label}</span>{icon && <span className="metric-icon"><Icon name={icon} /></span>}</div><strong className={tone}>{value}</strong>{note && <small>{note}</small>}</article>
 }
